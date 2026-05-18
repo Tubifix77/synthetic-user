@@ -1,0 +1,80 @@
+<svg width="700" height="740" viewBox="0 0 700 740" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Spine Loop architecture: synthetic user, executor, world, spine, memory</title>
+<desc>Closed-loop agent architecture with five components: a synthetic user generating goals, an executor agent producing actions, an external world providing grounding feedback, a spine evaluator scoring reliability, and a memory system feeding back into both intent and execution.</desc>
+
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+<style>
+.lbl { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; font-weight: 500; }
+.sub { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; font-weight: 400; }
+.edge { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; font-weight: 400; fill: #5F5E5A; }
+</style>
+</defs>
+
+<!-- Synthetic user (purple) -->
+<rect x="240" y="40" width="220" height="68" rx="10" fill="#CECBF6" stroke="#534AB7" stroke-width="1"/>
+<text class="lbl" x="350" y="68" text-anchor="middle" fill="#26215C">Synthetic user</text>
+<text class="sub" x="350" y="88" text-anchor="middle" fill="#3C3489">Goal and intent generator</text>
+
+<!-- Arrow: User -> Executor -->
+<line x1="350" y1="108" x2="350" y2="156" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="edge" x="360" y="135">goals</text>
+
+<!-- Executor (teal) -->
+<rect x="200" y="160" width="300" height="86" rx="10" fill="#9FE1CB" stroke="#0F6E56" stroke-width="1"/>
+<text class="lbl" x="350" y="188" text-anchor="middle" fill="#04342C">Executor agent</text>
+<text class="sub" x="350" y="208" text-anchor="middle" fill="#085041">LLM, planner, tool router</text>
+<text class="sub" x="350" y="226" text-anchor="middle" fill="#085041">Decomposes, calls tools, acts</text>
+
+<!-- Arrow: Executor -> World -->
+<line x1="290" y1="246" x2="180" y2="306" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="edge" x="195" y="278">actions</text>
+
+<!-- Arrow: Executor -> Logs -->
+<line x1="410" y1="246" x2="520" y2="306" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="edge" x="468" y="278">results</text>
+
+<!-- External world (amber) -->
+<rect x="60" y="310" width="240" height="88" rx="10" fill="#FAC775" stroke="#854F0B" stroke-width="1"/>
+<text class="lbl" x="180" y="338" text-anchor="middle" fill="#412402">External world</text>
+<text class="sub" x="180" y="358" text-anchor="middle" fill="#633806">Code runtime, APIs, files</text>
+<text class="sub" x="180" y="376" text-anchor="middle" fill="#633806">Non-synthetic constraints</text>
+
+<!-- Observation logs (amber) -->
+<rect x="400" y="310" width="240" height="88" rx="10" fill="#FAC775" stroke="#854F0B" stroke-width="1"/>
+<text class="lbl" x="520" y="338" text-anchor="middle" fill="#412402">Observation logs</text>
+<text class="sub" x="520" y="358" text-anchor="middle" fill="#633806">Outputs, errors, metrics</text>
+<text class="sub" x="520" y="376" text-anchor="middle" fill="#633806">Ground truth signal</text>
+
+<!-- Arrows: World + Logs -> Spine (L-shaped) -->
+<path d="M180 398 L180 446 L290 446 L290 478" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M520 398 L520 446 L410 446 L410 478" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- Spine (coral) -->
+<rect x="180" y="480" width="340" height="98" rx="10" fill="#F0997B" stroke="#993C1D" stroke-width="1"/>
+<text class="lbl" x="350" y="508" text-anchor="middle" fill="#4A1B0C">Spine controller</text>
+<text class="sub" x="350" y="528" text-anchor="middle" fill="#712B13">Evaluates reliability, attributes failure</text>
+<text class="sub" x="350" y="546" text-anchor="middle" fill="#712B13">Adjusts policy, enforces constraints</text>
+<text class="sub" x="350" y="564" text-anchor="middle" fill="#712B13">Consolidates experience into strategy</text>
+
+<!-- Arrow: Spine -> Memory -->
+<line x1="350" y1="578" x2="350" y2="624" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="edge" x="360" y="605">signals</text>
+
+<!-- Memory (gray) -->
+<rect x="160" y="626" width="380" height="86" rx="10" fill="#D3D1C7" stroke="#5F5E5A" stroke-width="1"/>
+<text class="lbl" x="350" y="654" text-anchor="middle" fill="#2C2C2A">Memory system</text>
+<text class="sub" x="350" y="674" text-anchor="middle" fill="#444441">Episodic, semantic, strategy, failure</text>
+<text class="sub" x="350" y="692" text-anchor="middle" fill="#444441">Confidence-scored, write-gated</text>
+
+<!-- Feedback loop: Memory -> Executor (left side, dashed green) -->
+<path d="M160 664 L40 664 L40 198 L200 198" fill="none" stroke="#1D9E75" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+<text class="edge" x="48" y="430" fill="#0F6E56">policy update</text>
+
+<!-- Feedback loop: Memory -> Synthetic User (right side, dashed green) -->
+<path d="M540 664 L660 664 L660 74 L460 74" fill="none" stroke="#1D9E75" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+<text class="edge" x="652" y="430" text-anchor="end" fill="#0F6E56">goal bias</text>
+
+</svg>
