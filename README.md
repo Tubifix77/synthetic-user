@@ -1,69 +1,70 @@
 # Synthetic User
 
-> A closed-loop agent architecture where one LLM generates intent, another executes, and a third evaluates reliability — all grounded by real-world feedback.
+> A closed-loop control system that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure replacing the human roles that ordinarily sit around such a loop.
 
-This is a **design-phase repository**. The architecture is locked. The code is not.
+**Status: ARCHITECTURE LOCKED at v1.2. Implementation begins.**
 
 ## What it is
 
-Most agentic systems still have a human at the top: someone types a prompt, the agent acts, the human evaluates the result and types the next prompt. The human is doing real cognitive work — choosing what matters, noticing when something is off, deciding what to try next — but that work is invisible to the system.
+Agentic frameworks like Claude Code do real work, but a human still has to drive them from outside: triaging incoming requests, deciding what to work on, watching and answering questions, managing context, and reviewing afterward. Synthetic User replaces that human layer with a structured set of components, each with bounded authority, all bound by reality through the framework's real tool calls.
 
-Synthetic User is an experiment in replacing that human layer with a learned policy — not because humans should be removed, but because the substitution forces every assumption about what humans were doing into the open. The result is a three-component control loop:
+The system replaces six distinct human roles around an agentic framework:
 
-- A **synthetic user** that generates goals and tasks under simulated constraints
-- An **executor agent** that decomposes goals into tool-using action sequences
-- A **spine controller** that evaluates outcomes and adjusts both upstream components
+- **Triage gate** \u2014 routes incoming requests (loop / direct-handle / reject)
+- **Seeder** \u2014 cycle-boundary multi-lens reflection + cycle preparation
+- **Steering brain** \u2014 in-flight resolution of framework doubts and action patterns
+- **Context steward** \u2014 continuous context monitoring during execution
+- **Evaluator** \u2014 post-hoc learning, schema validation, audit trail
+- **Decision Reports** \u2014 structured reasoning audit substrate across all components
 
-Bound together by an **external world** — real tools, real APIs, real error messages — that the loop cannot lie its way around.
+The agentic loop itself \u2014 planning, tool use, code generation, verification \u2014 is **inherited from the framework** (Claude Code in v1). Synthetic User does not reinvent agentic loops; it wraps existing ones.
 
 ## What it isn't
 
-**Not an attempt to remove humans from agentic systems.** The synthetic user replaces a slice of cognition — goal suggestion under constraints — not the human's role as the actual beneficiary of the work.
+**Not an attempt to remove humans from agentic systems.** The system replaces specific cognitive roles around the loop, not the human as beneficiary of the work.
 
-**Not an alignment experiment.** The spine evaluates reliability, not morality. "Did this work?" not "was this good?"
+**Not an alignment experiment.** Components optimize reliability and audit trail, not morality. "Did this work?" not "was this good?"
 
-**Not AGI.** Two LLMs in a loop with feedback is not a mind. It is a self-updating control system. That is interesting on its own terms.
+**Not AGI.** It is a self-updating control system around an existing framework. That is interesting on its own terms.
 
-**Not a continuation of [Growing Spine](https://github.com/Tubifix77/growing-spine).** Same era, same author, related lineage, different hypothesis. Growing Spine is a creature with one constraint and no enforcement layer. Synthetic User is a closed loop with explicit enforcement. They test different questions.
+**Not a continuation of [Growing Spine](https://github.com/Tubifix77/growing-spine).** Same era, same author, related lineage, different hypothesis. Growing Spine is a creature with one constraint and no enforcement layer. Synthetic User is a closed loop with explicit roles, schemas, and audit substrate.
 
-## Architecture
+## Architecture (v1.2 LOCKED)
 
-![Spine Loop architecture](architecture.svg)
+The buildable architecture lives in [architecture2.md](architecture2.md). Twelve revisions across the design phase: v0.1 (initial five-component decomposition) \u2192 v0.9 (context steward + cycle preparation) \u2192 v1.0 (CC hook binding + hybrid synth-user dispatch) \u2192 v1.1 (Decision Reports as audit substrate) \u2192 v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
 
-Five components, three layers of grounding:
+**Key concepts:**
 
-1. **Synthetic user** generates a goal from current memory state
-2. **Executor** decomposes the goal into tool-using actions
-3. **External world** runs the actions and produces non-synthetic feedback
-4. **Spine** evaluates the result, attributes failure, updates policy
-5. **Memory** consolidates experience and feeds back into both upstream components
+- **Run** \u2014 one bounded Synthetic User goal-pursuit, made of one or more cycles, terminates on a seeder stop code
+- **Cycle** \u2014 one seeder \u2192 framework execution \u2192 evaluator scoring iteration; maps 1:1 to a Claude Code "turn"
+- **Hybrid synth-user dispatch** \u2014 proactive entry via `SessionStart` hook + reactive entry via `Stop` hook; uncorrelated failure modes covered by both paths
+- **Decision Reports** \u2014 every component documents its reasoning in a schema-validated stream, routed through the evaluator for memory persistence
 
-Full component definitions, data flows, and failure modes are in [architecture.md](architecture.md).
+**Sixteen named failure modes** plus FM-17 (Decision Report inflation) cover the predictable ways the system fails \u2014 most are interaction failures between components rather than component-internal bugs.
 
 ## The hypothesis being tested
 
 Two LLMs talking to each other almost always collapse into a closed epistemic loop: internally coherent, externally wrong. The standard objection to multi-agent self-play is that it generates plausible nonsense at scale.
 
-The claim this project tests: **a closed loop becomes stable when external reality is allowed to disagree with it often enough.**
+The claim this project tests: **a closed loop becomes stable when external reality is allowed to disagree with it often enough, AND when each component's reasoning is documented in a form a human can audit without replaying the system.**
 
-Concretely — given a synthetic user + executor + spine + real tool execution + persistent memory, can the system improve at a non-trivial task over time without drifting into reward-hacking, hallucination ecosystems, or goal collapse?
+Concretely \u2014 given triage + seeder + brain + steward + evaluator + real tool execution + persistent memory + Decision Reports, can the system improve at a non-trivial task over time without drifting into reward-hacking, hallucination ecosystems, or goal collapse?
 
 If yes: this is a viable training-data-free agent improvement pattern.  
-If no: the failure modes themselves are the contribution — they map the boundary between useful self-play and pure self-talk.
+If no: the failure modes themselves are the contribution \u2014 they map the boundary between useful self-play and pure self-talk.
 
-## Why the spine matters
+## Implementation strategy
 
-The spine is not a moral filter. It is an **externalized consequence model**.
+[architecture2.md](architecture2.md) section 10 is the entry point for the build phase.
 
-The simplest version of its job: estimate whether an action will increase or decrease the system's track record of doing useful work over time. Not "is this good" but "does this break reliability."
+Build is **acceptance-test-driven**:
 
-This framing matters because:
+1. Twelve baseline acceptance scenarios are locked at v1.2 (section 10.3)
+2. Walking skeleton passes scenario 1 only; each subsequent scenario drives component growth
+3. Three test layers: acceptance scenarios (primary), contract tests on interfaces (defense in depth), targeted unit tests for deterministic gnarly logic
+4. **Mocking LLM-calling components is explicitly rejected** \u2014 the interaction with real model behavior IS what's being tested
 
-- Abstract ethics ("do no harm") collapse under ambiguity
-- Reliability is measurable from external feedback alone
-- The spine's incentive is aligned with system survival, which is aligned with continuing to produce useful output
-
-The risk this framing introduces — "sociopath mode," where the system optimizes the appearance of reliability rather than reliability itself — is real, and is treated as a named failure mode (see architecture.md). The mitigation is structural, not motivational: hidden evaluation metrics, randomized audits, external verification the system cannot anticipate.
+Recommended build order: scenarios 1 \u2192 2 \u2192 3 \u2192 4 \u2192 6 \u2192 9 \u2192 10 \u2192 5 \u2192 7 \u2192 8 \u2192 11 \u2192 12.
 
 ## Lineage
 
@@ -71,17 +72,20 @@ This project emerged from a multi-model conversation in May 2026, with contribut
 
 Conceptual ancestors:
 
-- **Actor-critic architectures** (Sutton & Barto) — the spine is the critic
-- **Self-play loops** (AlphaZero and successors) — the dual-LLM pattern
-- **Reflection agents** (Shinn et al. 2023) — the spine's evaluation role
-- **Tool-using agents with environmental feedback** (ReAct, Toolformer) — the grounding layer
-- **Sovereignty, Spine Reborn, Skynet, Growing Spine** (this author) — the lineage of persistent-memory agents this builds on
+- **Actor-critic architectures** (Sutton & Barto) \u2014 the evaluator is the critic
+- **Self-play loops** (AlphaZero and successors) \u2014 the closed-loop pattern
+- **Reflection agents** (Shinn et al. 2023) \u2014 the seeder's multi-lens reflection
+- **Tool-using agents with environmental feedback** (ReAct, Toolformer) \u2014 the grounding layer
+- **Sovereignty, Spine Reborn, Skynet, Growing Spine** (this author) \u2014 the lineage of persistent-memory agents this builds on
+- **Deming's PDCA + statistical process control** \u2014 the design principle that quality is built into the process, not inspected in afterward
 
-## Status
+## Repository layout
 
-Design-phase. No code yet, deliberately.
-
-The architecture is locked enough to build against, but the open questions in [architecture.md](architecture.md#7-open-design-decisions) need to land before implementation starts. Top of the list: what the synthetic user actually does at cycle zero — is its goal distribution hand-seeded, sampled from a corpus, or learned from a few example human sessions?
+- [architecture2.md](architecture2.md) \u2014 the locked v1.2 architecture (source of truth)
+- [architecture.md](architecture.md) \u2014 historical v0.1 design (preserved for lineage)
+- [architecture.svg](architecture.svg) \u2014 v0.1 Spine Loop diagram (historical)
+- [research-findings.md](research-findings.md) \u2014 web-research-backed TBD resolutions that fed into v1.0\u2013v1.2
+- LICENSE \u2014 MIT
 
 ## License
 

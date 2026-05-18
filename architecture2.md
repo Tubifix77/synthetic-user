@@ -1,12 +1,36 @@
-# Synthetic User — Architecture v0.9
+# Synthetic User — Architecture v1.2 (LOCKED)
 
-**Status:** Design refined through multi-turn collaborative critique across nine revisions. Implementation pending. Open decisions listed in section 8.
+**Status: ARCHITECTURE LOCKED — design phase complete. Implementation begins from this document.**
+
+Twelve revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
+
+All design TBDs are resolved. Residual work is implementation, not architecture. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the TBD history as a record of decisions made.
 
 **What this is.** A closed-loop agent architecture that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure that replaces the human roles ordinarily sitting around such a loop. The framework does the cognitive work inside cycles; this project builds the substitutes for the human who would otherwise drive the framework from outside.
 
 **Project naming note.** "Synthetic User" is the project name. Inside the project, the components have specific names: **triage gate** (request screening), **seeder** (cycle-boundary reflection, goal generation, and cycle preparation), **steering brain** (in-flight resolution), **context steward** (continuous context monitoring), **evaluator** (post-hoc learning). The project replaces the human user; the components handle specific slices of that replacement.
 
 **For version history, see section 10 (changelog).**
+
+## 0. Vocabulary
+
+This architecture wraps Claude Code (v1 reference framework). Where our component names collide with CC's native terms, the mapping is:
+
+| Our term | CC native term | What it means |
+|----------|---------------|---------------|
+| Tool call | Tool call | One tool invocation (read, edit, bash, etc.). CC fires `PreToolUse`/`PostToolUse` hooks around it. |
+| Cycle | **Turn** | One complete cycle from CC's perspective: user message in → reasoning → N tool calls → final response. May contain 15–20 tool calls. `Stop` hook fires at the end. |
+| Run | (no CC equivalent) | One bounded Synthetic User goal-pursuit. One or more cycles/turns, terminates on seeder stop code. Lives entirely in the wrapper layer. |
+| (Synthetic User has no concept above Run) | Session | One CC `session_id`, with its own transcript at `~/.claude/projects/`. Begins with `SessionStart` hook. May host one Run, multiple Runs, or partial Runs. |
+
+**Why two terms for one thing (cycle/turn).** "Cycle" describes the Synthetic User wrapper's view: seeder generates prompt → framework executes → evaluator scores. "Turn" describes CC's view: user-prompt-to-final-response. They refer to the same boundary from different sides. Throughout this doc, "cycle" is used when describing wrapper-level flow; "turn" when describing CC's internal lifecycle (hooks, compaction, etc.).
+
+**CC hook surface used by this architecture:**
+
+- `UserPromptSubmit` (fires when a new prompt enters CC) — proactive entry point for synth-user dispatch and cycle preparation
+- `PreToolUse` / `PostToolUse` (fires around each tool call) — action-pattern trigger surface for the steering brain
+- `Stop` (fires at the end of every turn, cannot be skipped, even `--dangerously-skip-permissions` doesn't disable it) — reactive entry point for evaluator AND fallback for synth-user dispatch when the proactive path didn't fire
+- `SessionStart` (fires when a new CC session begins) — used for initial pre-prompt instruction injection
 
 ## 1. Core concept
 
@@ -201,7 +225,9 @@ These three preparation tasks are part of the same reflection pass — the seede
 
 **Implementation.** Entirely the framework's job. For v1, Claude Code. Nothing in this section is new code.
 
-**Pre-prompt instruction.** Every framework session begins with the universal trigger instruction: *when you would have asked the user a question to proceed, instead emit `[steering-director: <your question>]` and continue based on the response you receive.* This is the one-sentence rule that converts every framework doubt into a steering brain invocation.
+**Pre-prompt instruction (proactive entry).** Every CC session begins with the universal trigger instruction, injected via the `SessionStart` hook: *when you would have asked the user a question to proceed, instead emit `[steering-director: <your question>]` and continue based on the response you receive.* This is the one-sentence rule that converts every framework doubt into a steering brain invocation. CC reads this at session start and ideally honors it for the session's duration.
+
+**Why this needs a backup (Stop-hook router, section 2.4).** Pre-prompt instructions degrade as CC's context compresses across many turns. By turn 30+ in a long run, the SessionStart instruction may have been compacted away or its salience faded. The reactive `Stop`-hook path catches halts that slip through. Both paths share dispatch logic; only the entry point differs.
 
 **Subcomponents (provided by the framework, not built):**
 - Planner
@@ -236,13 +262,17 @@ These three preparation tasks are part of the same reflection pass — the seede
 
 **Function.** Resolves in-flight situations during a cycle. One component, multiple trigger surfaces, one shared resolution logic.
 
-**Trigger surfaces.** The brain is invoked from two kinds of triggers:
+**Trigger surfaces.** The brain is invoked from three kinds of triggers, mapped to CC's hook surface. Each entry point feeds the same brain logic with the same normalized payload.
 
-**Trigger Type 1: Framework doubt.** The framework was about to ask the user a question. Per the universal pre-prompt instruction, it emits `[steering-director: <question>]` instead. The brain receives the question.
+**Trigger Type 1 (proactive): Framework doubt, caught in-turn.** CC's `SessionStart` hook injects a pre-prompt instruction: *when you would ask the user a question, dispatch to the synth-user component first.* If CC respects this, the dispatch happens mid-turn before any halt. The brain receives the question, returns a verdict, CC continues without halting. This is the cheap, common case.
 
-**Trigger Type 2: Action pattern match.** A registered action-pattern skill detects the framework is about to perform an action of interest. The skill routes to the brain. The brain receives the about-to-happen action.
+**Trigger Type 2 (reactive): Framework doubt, caught at turn end.** When the proactive path fails (context drift late in session, CC ignored the pre-prompt, halt language CC emits doesn't match the proactive instruction pattern), CC ends the turn with a halt disguised as a final response ("I need to ask..."). The `Stop` hook fires. The **Stop-hook router** (sub-mechanism, below) classifies the response: if halt-language is detected, route to brain; else route to evaluator. The brain handles the halt, the cycle wrapper synthesizes a follow-up `UserPromptSubmit` carrying the answer, CC restarts. The original "turn" becomes two turns from CC's perspective but one logical step from the Run's perspective.
 
-These are the same brain. The triggers are heterogeneous; the judgment is unified.
+**Trigger Type 3: Action pattern match.** A registered action-pattern skill detects CC is about to perform an action of interest (matched via CC's `PreToolUse` hook). The skill routes to the brain. The brain receives the about-to-happen action and returns proceed/redirect/halt.
+
+These three feed the same brain. The triggers are heterogeneous; the judgment is unified.
+
+**Why both proactive and reactive instead of picking one.** Each path fails in uncorrelated ways. The proactive instruction degrades over long sessions as CC's context compresses and pre-prompt salience fades. The reactive `Stop` hook depends on detectable halt-language in CC's response — brittle if CC phrases halts in novel ways. The hybrid covers both failure modes at the cost of a small router and a shared dispatch lock. This is the resolution of v0.9's open question about which dispatch mechanism to standardize.
 
 **Normalized payload.** Each trigger normalizes its input before handing to the brain:
 
@@ -269,7 +299,17 @@ The brain's primary reasoning engine is **the framework itself**. Most situation
 
 The hypothesis: for ~99% of in-flight situations, the framework's own reasoning is sufficient. The Prompt's heavier machinery is reserved for the ~1% where the question genuinely requires systematic external grounding.
 
-**The brain dispatch wrapper.** Small layer that handles trigger payload normalization, verdict normalization, escalation detection, and triple-check state tracking for Layer 6.
+**The brain dispatch wrapper.** Small layer that handles trigger payload normalization, verdict normalization, escalation detection, and triple-check state tracking for Layer 6. Also holds the dispatch lock shared with the Stop-hook router (below).
+
+**The Stop-hook router (new in v1.0).** Sub-mechanism handling Trigger Type 2's classification problem. The `Stop` hook fires at the end of every turn, and has two possible destinations: evaluator (normal turn completion) or brain (halt disguised as completion). The router decides which.
+
+Implementation follows TBD-9's triage-gate cascade pattern:
+
+1. **Stage 1: Rules.** Regex over CC's final response. Patterns: "I need to ask", "could you clarify", "should I", "do you want me to", "which would you prefer", etc. Handles ~95% of halts (the obvious ones). Free, <1ms.
+2. **Stage 2: Haiku classifier.** When Stage 1 is ambiguous (response *might* be a halt). Single Haiku call, ~200-500ms, ~$0.0001. Returns `halt` | `completion` | `unclear`.
+3. **Stage 3: Default to completion.** If Stages 1 and 2 don't decide, treat as completion and route to evaluator. The evaluator's audit will catch missed halts post-hoc; cost of misclassification at this stage is one extra refinement cycle, not silent failure.
+
+**Lock interaction with the seeder.** When the Stop-hook router routes to brain, the dispatch lock is acquired. The seeder's next cycle-boundary reflection checks the lock state: if a brain dispatch handled the cycle's terminal state, the seeder treats the cycle as continuing rather than completed, and skips its normal multi-lens reflection for this boundary. Prevents double-firing (FM-10 update).
 
 **Layer 6 sovereignty: triple-check, not human escape.**
 
@@ -305,6 +345,7 @@ The Pass 3 verdict is returned to the framework. The cycle continues normally. R
 4. **Brain prior adjustment.** Updates the steering brain's resolution priors.
 5. **Steward intervention audit.** Reviews context steward decisions during the cycle. Did the compact help or hurt? Did the suggested subagent delegation save context without losing fidelity? Tunes the steward's intervention thresholds over time.
 6. **Memory consolidation.** Compresses episodic events into reusable strategies.
+7. **Decision Report ingestion (new in v1.1).** Drains the per-Run report buffer at cycle close. Validates each report against its component's schema. Persists validated reports to memory. Flags malformed reports for self-review (a new finding type). Generates a self-report documenting its own scoring/attribution decisions (the only `self_reported=true` write in the system).
 
 **Audits the seeder.** The evaluator also reviews the seeder's reflection from cycle N-1's boundary — did the chosen direction prove valuable? Were the lenses well-selected? Did the stop decision land at the right point? Did the cycle preparation (specificity, tool config, subagent opportunities) prove useful or constraining?
 
@@ -325,6 +366,8 @@ Split into four distinct stores.
 **Failure memory** — "what broke the system." Catalogued errors with attribution.
 
 **Write access.** Only the evaluator writes. Everyone else reads.
+
+**Exception for Decision Reports (v1.1).** Components emit Decision Reports as structured output (section 2.8), but reports do NOT bypass the write-gating rule — they accumulate in a per-Run buffer and the evaluator drains the buffer at cycle close, persisting validated reports to memory. The only direct-write case is evaluator self-reports (`self_reported=true`), which the evaluator writes directly because routing through itself is impossible by construction.
 
 ### 2.7 Context steward (continuous monitor)
 
@@ -358,6 +401,12 @@ This continuous operation is what makes the steward its own component rather tha
 
 **The steward and the framework's own context tools.** The framework already has native context management (auto-compact at limits, slash commands available to a human user). The steward sits *between* the human-role and the framework's internal tools — it makes the decisions a human would make about *when* to invoke these tools, with what guidance. This is parallel to how the steering brain works: the framework has its own pause behavior, and the brain intercepts the moments where a human would have made a decision. The steward similarly intercepts the moments where a human would have noticed context state and acted on it.
 
+**Coordination with CC's compaction (new in v1.0).** Claude Code has its own internal compaction machinery: `microCompact` runs every turn truncating large tool outputs; `autoCompact` fires at a token threshold (approximately 80% of context window, with a 13,000-token buffer reserved for the summary itself). The steward must coordinate with these, not duplicate them.
+
+Rule: **steward intervenes before CC's autocompact would fire, never after.** Concretely, the steward's `suggest_compact` threshold sits at ~60% of *our counted tokens*. Because our estimate undercounts (we don't see CC's hidden system prompt, internal tool schemas, or framework scratchpad overhead), 60% of our count typically corresponds to 70–75% of CC's actual count — still comfortably below CC's autocompact trigger. The steward thus acts first when it's going to act at all, applying guided compaction with preservation hints, rather than letting CC's silent autocompact strip information without judgment.
+
+The 60% / 80% relationship is a v1 build-time constant pair (tunable per deployment). If CC's autocompact fires anyway (steward missed it, threshold drifted, run exceeded estimates), the steward's other interventions — `suggest_delegate`, `suggest_interrupt` — remain orthogonal to autocompact and continue functioning. Only `suggest_compact` is at risk of double-firing with CC, and the threshold gap is the mitigation.
+
 **Implementation note.** Could be a thin LLM-based monitor (small model, narrow prompt, runs periodically), or partially rule-based (utilization thresholds trigger rule-based checks, LLM only for ambiguous cases). v1 hybrid is likely best — rules for clear thresholds (>80% utilization → suggest compact), LLM for nuance (is this exploration polluting main context, or is it core to the goal?).
 
 **Cost note.** The only component that runs continuously. Cost matters more here than for other components. Should be the smallest viable model (Haiku-tier in v1 reference). Invoked periodically (every N framework steps, or every M seconds, or hook-based on context state changes) rather than per-token.
@@ -365,6 +414,87 @@ This continuous operation is what makes the steward its own component rather tha
 **Recording for the evaluator.** Every steward intervention is logged in episodic memory: what triggered it, what action was suggested, whether the framework followed it, what the downstream effect was. The evaluator uses this to tune intervention thresholds and identify steward errors (FM-15).
 
 **Replaces what human did.** The human running `/context` to check state, deciding when to `/compact`, deciding when to `/clear`, deciding when to spawn subagents for context-saving purposes. The course's whole "context management" topic is what this component does.
+
+### 2.8 Decision Reports
+
+**Function.** Every component that makes a decision emits a structured Decision Report documenting *what was decided, what alternatives were considered, what evidence was used, and what the confidence and reversibility look like*. Reports are byproducts of the same reasoning pass that produced the decision — not a separate analytical step.
+
+**Why this exists.** Event logs ("brain returned proceed at T") tell you *what happened*. Decision Reports tell you *why and what else was on the table*. Production AI systems need both. Without structured decision reasoning, post-hoc analysis depends on replaying the system; with reports, an auditor can scan reasoning across runs without re-executing anything.
+
+**Operational model.** Each component generates its own reports as structured output. Reports do NOT write directly to memory — they go to a per-Run report buffer (in-memory queue keyed by `run_id`). The evaluator drains the buffer at cycle close, validates each report against its component's schema, and persists to memory. This preserves the v0.9 rule that only the evaluator writes (section 2.6), while enabling every component to participate in the audit substrate.
+
+**The one exception: evaluator self-reports.** The evaluator's own decisions (scoring, attribution, threshold tuning) cannot route through itself — a notary can't notarize their own signature. Evaluator reports write directly to memory, but are flagged `self_reported=true` so external audits know to apply extra scrutiny. This is the only case where the evaluator-mediated-writes rule is bypassed.
+
+**Schema.** All reports share a common skeleton with component-specific extensions.
+
+```yaml
+report_id: <uuid>
+run_id: <run uuid>
+cycle_id: <which cycle in the run>
+turn_id: <which CC turn>
+component: triage | seeder | brain | steward | router | evaluator
+timestamp: <iso>
+decision_type: <component-specific enum>
+report_minimal: <bool>     # true for steward routine pings; minimizes schema requirements
+inputs:
+  trigger: <what caused this decision to be made>
+  evidence_consulted: [<list of evidence items with sources>]
+  prior_context: <relevant memory retrievals>
+alternatives_considered:
+  - option: <name>
+    weight: <0..1 or 'rejected'>
+    rationale: <one sentence>
+selected:
+  option: <name>
+  rationale: <reasoning chain>
+  confidence: low | medium | high
+  reversibility: low | medium | high
+audit_flags:
+  - <flag>: <reason>     # e.g. low_confidence_high_impact, novel_situation, conflict_with_prior
+self_reported: <bool>    # true only for evaluator self-reports
+component_specific:
+  <fields specific to this decision type>
+```
+
+**Per-component `component_specific` blocks:**
+
+- **Triage gate**: `route_selected`, `simple_handle_path` (if route=simple), `rejection_reason` (if route=reject), `clarification_request` (if route=reject)
+- **Seeder**: `lenses_chosen`, `lenses_skipped_with_reason`, `lens_outputs`, `synthesis_weighting`, `stop_check_result`, `cycle_prep` (when continuing), `refinement_depth` (cycle count in this run)
+- **Brain**: `trigger_type` (proactive_doubt | reactive_doubt | action_pattern), `triple_check_fired` (bool), `web_search_queries` (list, when fired), `pass_1_output`, `pass_2_critique`, `pass_3_reconciliation` (last three only when triple-check fired)
+- **Stop-hook router**: `stage_reached` (1 | 2 | 3), `rule_match_pattern` (when stage 1), `haiku_classification` (when stage 2), `final_routing` (evaluator | brain)
+- **Steward (routine ping, `report_minimal=true`)**: `counted_tokens`, `threshold_distance`, `decision: continue_silent`. Other schema fields empty by design.
+- **Steward (intervention)**: `intervention_type` (compact | clear | delegate | interrupt), `framework_followed` (bool), `downstream_effect` (filled in post-hoc by evaluator)
+- **Evaluator (self-report)**: `cycle_score`, `criteria_breakdown`, `failure_attribution` (when applicable), `anomaly_detected` (bool), `layer2_attribution_fired` (bool), `layer3_classifier_updated` (bool), `threshold_adjustments` (list)
+
+**Two-tier reporting for the steward.** The steward runs continuously and would generate hundreds of reports per cycle if every check produced a full schema entry. Two tiers solve this:
+
+1. **Routine pings** (`report_minimal=true`): emitted on every check, contain only essential fields. ~50 tokens each. Effectively structured log entries that still use the report schema so the evaluator can scan them uniformly.
+2. **Intervention reports** (`report_minimal=false`): emitted only when the steward acts (compact/clear/delegate/interrupt). Full schema with alternatives, evidence, reversibility. ~600 tokens each.
+
+Evaluator's schema validator applies lighter checks to minimal reports.
+
+**Buffer crash behavior.** If the system crashes mid-cycle, reports in the buffer are lost. Accept this for v1: reports are reasoning audit, not transactional state. Losing a buffer means losing visibility into one cycle's decisions, not losing the cycle's actual deliverable. Operators concerned about audit completeness can configure periodic buffer flushes (every N reports or every M seconds); this is a deployment knob, not core architecture.
+
+**Retention policy (v1 default, tunable).** Decision reports accumulate fast. Estimated ~10,500 tokens per Run on average; over a year of moderate operation, this becomes millions of tokens of audit material. v1 retention:
+
+- Full reports (triage, seeder, brain, router, evaluator, steward interventions): retained indefinitely
+- Steward routine pings: retained for 30 days, then summarized into per-cycle aggregates ("47 pings, max counted_tokens 142k, threshold never crossed") and individual pings purged
+- Aggregate summaries: retained indefinitely
+
+Operators can override either dimension. The retention policy is config, not architecture.
+
+**Query interface (deployer-specified).** Reports must be queryable, not just storable. "What did the brain decide about destructive actions in the last month?" should be answerable without replaying any run. v1 ships with structured storage (TBD-4 memory architecture) supporting these query shapes:
+
+- Filter by component, decision_type, time window, audit_flag
+- Filter by confidence/reversibility (find low-confidence high-impact decisions)
+- Filter by `self_reported=true` (find evaluator self-audits needing external review)
+- Cross-reference: "show all brain reports where triple_check_fired and the next cycle scored below threshold"
+
+The UI for these queries (CLI, dashboard, notebook integration, scheduled summaries) is deployment-specific (TBD-8a).
+
+**Schema evolution.** Lock the spine, iterate the ribs. The top-level skeleton (report_id, run_id, component, inputs, alternatives, selected, audit_flags) is stable. `component_specific` blocks are explicitly evolvable — fields can be added across versions without breaking older reports. The evaluator's schema validator is version-aware.
+
+**Replaces what human did.** The human writing post-mortem notes after each AI session: "the agent chose X, considered Y and Z, picked X because [reasoning], I disagreed but let it run." Decision reports are that note, generated by the components themselves, in a form that aggregates across many runs.
 
 ## 3. Data flow
 
@@ -444,9 +574,11 @@ Mechanisms should align with boundaries the work itself produces, not with arbit
 
 The architecture has multiple moments where a halt-on-doubt mechanism was proposed and rejected. The Layer 6 triple-check returns its best guess and lets reality validate post-hoc. The seeder's stop decision is earned through multi-lens reflection, not gated by a counter. The synthetic-user hypothesis is that closed loops stabilize through reality's disagreement, not through cautious abstention.
 
-**Principle 6 (new in v0.9): Build quality into the process, don't inspect it in afterward.**
+**Principle 6 (new in v0.9, extended in v1.2): Build quality into the process, don't inspect it in afterward.**
 
 (Deming.) The architecture's design choices reflect this consistently. The seeder's cycle preparation (specificity, tool config, subagent identification) builds context efficiency into the cycle's start rather than letting context problems emerge for the steward to fix mid-cycle. The triage gate builds work-fitness into the entry rather than letting the engine process unfit work. The action-pattern triggers build irreversibility caution into action moments rather than catching mistakes afterward. The principle that ties these together: when quality can be designed into a phase, prefer that over hoping later phases will correct for upstream variance.
+
+**Operational corollary (locked in v1.2): acceptance tests are upstream of code.** The implementation strategy (section 10) operationalizes this principle directly. Acceptance test scenarios are written before code, the walking skeleton passes scenarios in order of difficulty, and every component grows under test pressure rather than being unit-built and integrated later. This is the testing equivalent of designing quality in: the test defines what "done" means before the code is written, rather than being applied retroactively to confirm that existing code happens to work. The contract-test layer for inter-component interfaces and the targeted unit-test layer for deterministic gnarly logic are defense-in-depth around the acceptance-driven core.
 
 ## 6. Failure modes
 
@@ -530,7 +662,7 @@ The most important section. These are the predictable ways the system fails.
 
 **Cause.** The Prompt has no memory of being invoked inside another invocation.
 
-**Mitigation.** The dispatch layer's binary `in_triple_check` lock prevents nested triple-checks.
+**Mitigation.** The dispatch layer's binary `in_triple_check` lock prevents nested triple-checks. **As of v1.0, the lock is also shared with the Stop-hook router** — a brain dispatch initiated by the Stop hook sets the lock, the seeder's next `UserPromptSubmit` checks it and suppresses redundant reflection. Same bit of state; two entry points reading it.
 
 ### Failure mode 11: Premature session completion
 
@@ -589,6 +721,18 @@ The most important section. These are the predictable ways the system fails.
 - Evaluator audits whether specificity helped or constrained
 - Preparation suggestions can be relaxed by the steering brain if the framework needs more latitude
 
+### Failure mode 17 (new in v1.1): Decision Report inflation / audit noise
+
+**Symptom.** Reports accumulate faster than they can be reviewed. Steward routine pings dominate storage. Audits become slow because filtering is needed before any pattern can surface. Operators stop reading reports because the signal-to-noise ratio is poor.
+
+**Cause.** Continuous-monitor components (steward) emit reports proportional to runtime, not to decision count. Without aggregation, the audit substrate buries genuine decisions in routine noise.
+
+**Mitigation.**
+- Two-tier reporting (routine pings minimal, interventions full) keeps full-schema reports proportional to real decisions
+- 30-day rolling summarization for steward routine pings prevents indefinite accumulation
+- Query interface biases toward full reports (minimal pings filtered out unless explicitly requested)
+- Evaluator audits the audit substrate itself: if reports stop being read, that's a finding
+
 ## 7. What this is, restated
 
 It bears repeating because the framing matters:
@@ -599,45 +743,47 @@ It bears repeating because the framing matters:
 - **Not human-in-the-loop.** A standard agentic-workflow framing positions the human as a governor reviewing the agent's plan before execution. The synthetic-user architecture deliberately rejects this. The triage gate is the only place a human can be involved, and it sits *before* the loop runs, not as a checkpoint inside it. Once the gate accepts the request, the system runs to completion without human approval at any intermediate step. Safeguards are structural (multi-lens reflection, context monitoring, external grounding, post-hoc evaluator learning) rather than procedural.
 - **Not finished.** This is v0.9. Six TBDs remain open.
 
-## 8. Open design decisions
+## 8. Design decision history (all resolved at v1.2)
 
-### Genuine architecture / design work (ours to land)
+Every TBD from the design phase is now resolved. This section retains the resolution record so future maintainers understand *why* each decision landed where it did. No architecture work remains.
 
-**TBD-1b (resolved in v0.8, extended in v0.9): Seeder cycle-boundary reflection structure.** Multi-lens reflection with six potential lenses. Stop decision emerges from skeptical lens winning the synthesis. v0.9 extends with cycle preparation as part of seeder output (specificity, tool config, subagent opportunities). Implementation details (specific lens prompts, selection rules, synthesis format, preparation format) are v1 build work.
+### Genuine architecture decisions (resolved)
 
-**TBD-2a: Evaluator learning mechanism.** Fixed evaluator (rules + small classifier), learned policy that updates over time, or frozen LLM with a careful prompt? The evaluator is the largest single piece of new build work.
+**TBD-1b: Seeder cycle-boundary reflection structure.** Multi-lens reflection with six potential lenses (comparative, aspirational, creative, production, skeptical, user-perspective). Stop decision emerges from skeptical lens winning the synthesis. Extended in v0.9 with cycle preparation. Locked at v0.9.
 
-**TBD-9: Triage gate design.** Classifier mechanism, the set of simple-handle paths shipped in v1, the log format for evaluator audit, and the threshold for rejection.
+**TBD-2a: Evaluator learning mechanism.** Three-layer hybrid: rules-based scoring (Layer 1, always, cheap, deterministic), LLM attribution on anomaly only (Layer 2, Opus call when needed), classifier-based threshold tuning (Layer 3, scikit-learn on tabular features extracted from episodic memory). Resolved via research; pattern matches Skynet's RIPPER-based learned-rule quarantine. Locked at v1.2 (research-findings doc).
 
-**TBD-11 (new in v0.9): Context steward design.** Monitoring mechanism (polling, hook-based, or hybrid), suggestion threshold tuning, intervention authority and override rules, cost-optimization. The steward's continuous operation means cost matters more here than for other components.
+**TBD-2b: Steering brain implementation.** Framework's reasoning as default + The Prompt with web search as Layer 6 escalation. Triple-check pattern (Pass 1 answer → Pass 2 critique with web search → Pass 3 reconciliation), dispatch lock prevents recursion. Locked at v0.3.
 
-### Configuration / specification (light architecture work)
+**TBD-2c: Initial action-pattern trigger set.** Small custom layer over framework's own pauses. Four initial triggers locked: `before:git_push_to_public_repo`, `before:claim_done`, `before:add_dependency`, `before:modify_schema`. Locked at v1.2.
 
-**TBD-2c: Initial action-pattern trigger set.** Most action-pattern detection is inherited from the framework's own pause instincts. The custom layer is small.
+**TBD-8a: Observation surface (consumer side).** Out of architecture scope — deployer's choice (logs, dashboard, journal, scheduled summaries, notebook integration). v1.2 confirms this as a deployment decision, not architecture. Closed.
 
-**TBD-4: Memory architecture.** SQLite tables / memory MCP / vector store / graph DB.
+**TBD-8b: Decision Report schema specifics (producer side).** Top-level skeleton and per-component blocks locked in section 2.8. Schema versioning principle ("lock the spine, iterate the ribs") locked in v1.1. Locked at v1.1.
 
-**TBD-5: Model selection per role.** v1 reference: Claude tiers across roles (Haiku for triage and steward, Sonnet for seeder and brain, Opus for evaluator and Layer 6).
+**TBD-9: Triage gate design.** Three-stage cascade: rules (Stage 1, ~70% of requests, <1ms, free) → Haiku classifier (Stage 2, ~28%, 200-500ms, ~$0.0001 each) → The Prompt fallback (Stage 3, ~2% ambiguous). Six initial simple-handle paths defined (weather/time/currency/fact-lookup/web-search/definition). Locked at v1.2 (research-findings doc).
 
-**TBD-8: Observation surface.** Logs / dashboard / journal / scheduled summaries.
+**TBD-11: Context steward design.** Token estimation method: running counter of all observed I/O, conservative by construction (we undercount). Autocompact coordination: steward at ~60% of our counted tokens, before CC's autocompact at ~80% of its own count. Monitoring mechanism: hook-based subscription to CC's per-turn tool-result events; polling fallback. Intervention threshold for compact locked at 60%; other thresholds are evaluator-tunable v1 constants. Locked at v1.2.
 
-### Resolved or closed
+### Configuration items (resolved)
 
-- **TBD-1** — Cold-start goal source: out of scope (v0.4)
-- **TBD-1b** — Cycle-boundary reflection: multi-lens model + cycle preparation (v0.8, extended v0.9)
-- **TBD-2b** — Steering brain implementation: framework's reasoning as default + The Prompt as Layer 6 escalation (v0.3, sharpened in v0.6)
-- **TBD-3** — Reality injection frequency: dissolved (v0.2)
-- **TBD-6** — Task domain: closed; domain-agnostic (v0.7)
-- **TBD-7** — Run model: closed; run-model-agnostic (v0.7)
-- **TBD-10** — Completion gate: collapsed into TBD-1b (v0.5)
+**TBD-4: Memory architecture.** SQLite for episodic/strategy/failure tables + Chroma or FAISS for semantic memory. Custom schema beats off-the-shelf agent-memory libraries (Mem0, Letta) because our memory is system-state, not user-conversation. Schema sketched in research-findings doc. Locked at v1.2.
 
-### Summary of remaining work
+**TBD-5: Model selection per role.** v1.2 reference: Claude tiers across roles. Haiku for triage Stage 2 and context steward (continuous monitor, smallest viable model). Sonnet for seeder multi-lens reflection and steering brain dispatch routine cases. Opus for evaluator Layer 2 attribution and Layer 6 triple-check. Deployer can override; v1.2 ships with these defaults. Locked at v0.7.
 
-Three genuine design questions: **TBD-2a (evaluator), TBD-9 (triage gate), TBD-11 (context steward).**
+### Closed without action (resolved)
 
-Four configuration items: **TBD-2c, TBD-4, TBD-5, TBD-8.**
+- **TBD-1** — Cold-start goal source: out of scope. Deployer's choice (human prompt, agent queue, file backlog, autonomous generation, corpus). Closed v0.4.
+- **TBD-3** — Reality injection frequency: dissolved. Per-action grounding via the framework's tool calls handles this implicitly; no separate mechanism needed. Closed v0.2.
+- **TBD-6** — Task domain: closed; architecture is domain-agnostic. Whatever the framework can do, the wrapper can run cycles over. Closed v0.7.
+- **TBD-7** — Run model: closed; architecture is run-model-agnostic. Continuous daemon, scheduled bursts, or interactive sessions all work. Closed v0.7.
+- **TBD-10** — Completion gate: collapsed into TBD-1b. The seeder's skeptical lens IS the completion gate; no separate mechanism. Closed v0.5.
 
-Seven TBDs total. The architecture is locked enough to begin v1 implementation against.
+### Summary
+
+**Twelve TBDs raised across the design phase. All resolved. Zero architecture work remaining.**
+
+The buildable architecture is sections 1-7 (concept, components, data flow, design insight, design principles, failure modes, framing). The implementation path is section 10. The audit substrate is section 2.8. Everything else is context for understanding why decisions landed where they did.
 
 ## 9. Component summary
 
@@ -656,10 +802,83 @@ For quick reference, the system at v0.9 consists of:
 **Infrastructure:**
 - **External world** — non-negotiable grounding (inherited from the framework's tool calls)
 - **Memory** — four stores (episodic, semantic, strategy, failure), write-gated to the evaluator
+- **Decision Reports** (new in v1.1) — audit substrate, every component emits structured reasoning, evaluator-mediated writes, two-tier reporting for continuous monitors
 
 Five components we build (seeder, brain dispatch, context steward, evaluator, plus triage gate as auxiliary), plus the cycle wrapper that orchestrates them. The executor is the framework. The world is what the framework's tools touch. Memory is configured, not built.
 
-## 10. Changelog
+## 10. Implementation strategy
+
+This section is the entry point for the build phase. The architecture is locked; this section says how to build it.
+
+### 10.1 Core principle: acceptance tests are upstream of code
+
+The Synthetic User system is a control system with tightly coupled components. Almost every documented failure mode (FM-2, 3, 7, 8, 13, 14, 15, 16) is an interaction failure, not a component-internal failure. Unit-testing components in isolation would catch approximately none of these.
+
+The implementation therefore follows **acceptance-test-driven development** at the system level. Tests are written before code. Tests define what "done" means. Components grow under test pressure rather than being built bottom-up and integrated later. This operationalizes Principle 6 (build quality into the process).
+
+**Build sequence:**
+
+1. **Write acceptance test scenarios** (section 10.3) before any production code exists. These ARE the specification.
+2. **Build a walking skeleton.** All components present as stubs. Data flows end-to-end. Skeleton passes scenario 1 (the simplest) and only scenario 1.
+3. **Iterate per scenario.** Pick the next failing scenario. Identify the component(s) that need to grow. Grow them minimally. Run *all* acceptance tests, not just the new one — a change in any component can break another's assumptions. Fix any regressions before moving on.
+4. **Component depth comes from test pressure.** The seeder's multi-lens reflection grows because a scenario needs it. The brain's triple-check fires because a scenario forces it. The evaluator's classifier matures because real scoring failures demand it. Architecture does not pre-specify the full implementation of each component; tests pull capability into existence as required.
+
+### 10.2 Test layers (defense in depth)
+
+Three layers, listed by priority and where coverage starts:
+
+**Layer 1 — Acceptance scenarios (primary).** End-to-end tests covering full Runs. Drives 80% of implementation work. Every scenario in section 10.3 is a Layer 1 test. Failure of a Layer 1 test blocks progress on later scenarios.
+
+**Layer 2 — Contract tests (defense in depth on interfaces).** Schema-level tests on the stable interfaces between components: Decision Report schema, brain verdict shape, steward suggestion shape, seeder output shape, evaluator score shape. Written just-in-time when an interface is first touched in a Layer 1 test. Prevents silent contract drift as components grow internally.
+
+**Layer 3 — Targeted unit tests (defense in depth on deterministic gnarly logic).** Reserved for the minority of code where unit-isolation actually tests something true: regex matching in the Stop-hook router, dispatch lock state machine transitions, Decision Report schema validation, idempotent patch application logic, token counter increment correctness. Not for LLM-calling components — those are tested only through acceptance scenarios where their behavior matters.
+
+**Anti-pattern explicitly rejected: unit tests that mock the LLM.** Mocking the brain's reasoning, the seeder's lenses, or the evaluator's scoring produces tests that pass on stubs and fail on the real system. The interaction with real LLM behavior IS what's being tested; mocking it defeats the purpose. Layer 1 acceptance tests run against real models.
+
+### 10.3 Baseline acceptance scenarios (locked at v1.2)
+
+Twelve scenarios. Listed in approximate order of complexity. Build order should pull scenarios in roughly this order, though later scenarios may pull capability for earlier ones forward.
+
+**Scenario 1: Simple successful Run.** Cold-start request enters via triage. Triage routes to loop. Seeder cold-start passes the goal to CC. CC executes one turn, produces a deliverable. Evaluator scores high. Seeder reflects, all lenses converge on "done". Seeder stops with `complete`. Run terminates cleanly. Verifies: walking skeleton, data flow end-to-end, evaluator-mediated Decision Report writes.
+
+**Scenario 2: Refinement Run.** Cold-start request requires multi-step work (e.g., "build CSV deduplicator"). Cycle 0 builds. Seeder reflects, production+skeptical lenses surface untested edge cases. Cycle 1 refines (adversarial test cases). Seeder reflects, skeptical lens dominates, stops with `refinement_complete`. Run terminates cleanly. Verifies: multi-cycle Runs, seeder multi-lens reflection, cycle preparation between cycles.
+
+**Scenario 3: Halt-and-resume via reactive Stop-hook path.** CC halts mid-turn with disguised-as-completion language ("I need to ask..."). Stop-hook router Stage 1 catches it via regex. Routes to brain. Brain resolves with The Prompt + web search. Cycle wrapper synthesizes follow-up `UserPromptSubmit` carrying the answer. CC restarts. Original turn becomes two CC turns but one logical cycle. Verifies: reactive entry point, Stop-hook router classification, dispatch lock.
+
+**Scenario 4: Halt-and-resume via proactive SessionStart instruction.** CC honors the SessionStart pre-prompt instruction. When CC would have asked a question, it emits `[steering-director:]` instead. Brain receives the question mid-turn, returns verdict, CC continues without halting. Run completes in one CC turn rather than two. Verifies: proactive entry point, SessionStart hook injection, in-turn dispatch.
+
+**Scenario 5: Steward fires compact intervention mid-cycle.** Long-running cycle pushes counted tokens past 60% of context. Steward emits `suggest_compact(preserve_guidance)`. CC compacts with the steward's preservation hints. Cycle continues healthy. Verifies: continuous monitoring, token estimation accuracy, steward intervention path, autocompact-coordination threshold gap.
+
+**Scenario 6: Triage rejection.** Malformed request enters (vague, missing context, contradictory constraints). Triage Stage 1 rules don't match, Stage 2 Haiku classifies as reject-with-clarification. Triage returns structured clarification request to goal source. No cycle ever starts. Verifies: triage rejection path, Stage 2 escalation, structured rejection format.
+
+**Scenario 7: Triple-check fires on hard call.** Cycle hits a genuinely ambiguous decision (e.g., "should this destructive operation proceed despite low confidence"). Brain's dispatch wrapper sets `in_triple_check`. Pass 1 produces an answer. Pass 2 critiques with web search. Pass 3 reconciles. Final verdict returned to CC. Dispatch lock prevents nested triple-checks during Passes 1-3. Verifies: Layer 6 sovereignty mechanism, dispatch lock under fire, web search integration.
+
+**Scenario 8: Evaluator catches anomaly, Layer 2 attribution fires.** Cycle completes but evaluator Layer 1 rules score below threshold. Layer 2 Opus attribution call fires, identifies the failing subsystem (e.g., "brain rubber-stamped a halt that should have been escalated"). Layer 3 classifier updates threshold weights. Failure flagged in episodic memory for future audit. Run continues to next cycle informed by the attribution. Verifies: three-layer evaluator hybrid, anomaly detection, attribution writing to failure memory.
+
+**Scenario 9: Decision Reports queryable end-to-end.** Run a representative scenario. Query the report store afterwards: "show all brain reports from this Run where triple_check_fired". Verify the returned reports match the runtime decisions, schema-validate, are flagged correctly. Verifies: report buffer flow, evaluator schema validation, query interface, schema completeness.
+
+**Scenario 10: Dispatch lock prevents double-fire.** Construct a Run where both the proactive SessionStart path and the reactive Stop-hook path could fire on the same logical halt (e.g., CC partially honors the SessionStart instruction but emits halt-language anyway at turn end). Verify: only one brain dispatch occurs, the dispatch lock state is shared between the Stop-hook router and the seeder's reflection path, the seeder skips reflection for the locked boundary. Verifies: FM-10 mitigation, shared lock state, no double-firing.
+
+**Scenario 11: Long-Run survival.** Run a Synthetic User Run that spans 5+ cycles (multi-stage refinement, e.g., "design and implement a small system with tests and docs"). Steward maintains context health across the full Run via multiple compact interventions. No catastrophic context loss. No silent autocompact firing. Final cycle scores match or exceed earlier cycles. Verifies: steward sustained operation, multi-cycle stability, FM-14 mitigation in practice.
+
+**Scenario 12: Graceful degradation under component failure.** Inject a fault into one component (e.g., evaluator's Layer 2 Opus call returns malformed output, or steward's token counter desyncs from reality). Verify: evaluator audits the fault, system continues completing the current Run without that component's full participation, fault is logged for next-Run review, and the system re-enables the component cleanly for the next Run if the fault was transient. Verifies: graceful degradation, evaluator's audit-the-audit-substrate behavior (FM-17 mitigation), no single-component failure cascades to system failure.
+
+### 10.4 Build order
+
+Scenarios 1-2 establish the walking skeleton and basic Run lifecycle. These are the gates: nothing else gets built until scenarios 1 and 2 pass cleanly. After that, prioritize scenarios that exercise infrastructure (3, 4, 9 — hooks, dispatch, reports) before scenarios that exercise depth (5, 7, 8, 11 — steward, triple-check, evaluator, long-Run). Scenario 12 is last because graceful-degradation testing requires all other components to be mature enough to fault meaningfully.
+
+**Recommended order:** 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 11 → 12.
+
+Each scenario should fail meaningfully before code is written to pass it. "Meaningfully" means: the test exists, the system runs against the test, the test reports a specific failure that identifies what's missing. Tests that fail because of missing-import errors or syntax errors don't count — those indicate the scaffolding isn't ready yet, not that the test is providing pressure.
+
+### 10.5 What this section is NOT
+
+- Not a deployment guide. Deployment specifics (model selection, observation UI, memory backend, cold-start source) are deployer decisions, not implementation-strategy decisions.
+- Not a project schedule. No time estimates, no team-sizing, no Gantt chart. The acceptance scenarios drive the schedule; whoever builds this should estimate per-scenario based on their context.
+- Not exhaustive. Twelve scenarios are the *baseline*. Real implementation will discover additional scenarios as edge cases surface. New scenarios get added to the acceptance test suite and the suite is re-run from scenario 1 forward to verify no regression.
+- Not a substitute for the architecture. Sections 1-7 define what gets built. Section 10 defines how the build proceeds. Both are required reading before code starts.
+
+## 11. Changelog
 
 ### v0.1 → v0.2
 
@@ -706,3 +925,47 @@ Seeder restructured around multi-lens reflection. Six lenses, seeder selects rel
 **Component count.** Built: 5 (seeder, brain, steward, evaluator, triage) plus the cycle wrapper. Auxiliary: 1 (triage). Inherited: executor (framework) + external world. Configured: memory, observation, model selection.
 
 The v0.9 update was driven by external course material (Anthropic Claude Code 101: Context Management module) bringing the context-management dimension into focus. The architecture had treated context as the framework's internal concern; v0.9 recognizes that the human role around context (running `/context`, deciding when to `/compact` or `/clear`, identifying subagent opportunities) is a real human-substitute role that needs its own component. Steward handles it continuously; seeder's cycle preparation handles the pre-cycle dimension.
+
+### v0.9 → v1.0
+
+**Vocabulary section added (section 0).** Explicit mapping between Synthetic User wrapper terms and Claude Code native terms. "Cycle" (wrapper view) and "Turn" (CC view) refer to the same boundary; "Run" names the multi-cycle goal-pursuit unit that has no CC equivalent. Confirmed by reading CC's own source code documentation (DeepWiki) and CC blog material — our "cycle" cleanly maps to CC's "turn".
+
+**Hybrid synth-user dispatch resolved (sections 2.2, 2.4).** v0.9 left open whether the synth-user dispatch should be proactive (pre-prompt instruction) or reactive (skill-triggered on halt). v1.0 ships both, hybrid by default. Proactive entry via `SessionStart` hook; reactive entry via `Stop` hook with a router sub-mechanism that classifies turn-end responses as completion-vs-halt. Failure modes of the two paths are uncorrelated, so the hybrid covers both.
+
+**Stop-hook router added as sub-mechanism of brain dispatch (section 2.4).** Three-stage classification cascade (rules → Haiku → default-to-completion) decides whether a `Stop`-hooked turn routes to brain or evaluator. Same pattern as the triage gate from TBD-9. Dispatch lock extended to span both proactive and reactive entry points (FM-10 update).
+
+**Steward / autocompact coordination resolved (section 2.7).** Steward acts at ~60% of our counted tokens; CC's autocompact fires around ~80% of its own count. We undercount (no visibility into CC's hidden system prompt, tool schemas, framework scratchpad), so 60%-of-ours sits around 70-75%-of-CC's — comfortably before autocompact. The threshold gap absorbs estimation drift. Steward's other interventions (delegate, interrupt) remain orthogonal to autocompact.
+
+### v1.0 → v1.1
+
+**Decision Reports added as cross-cutting subsystem (section 2.8).** Every component documents its reasoning in a structured, schema-validated report. Reports route through the evaluator (preserves v0.9 write-gating); evaluator self-reports are the single exception. Two-tier reporting accommodates the steward's continuous-monitor cost profile.
+
+**Section 2.6 write-gating exception documented.** Decision Reports buffer through the evaluator; the evaluator self-reports directly. These are the only modifications to v0.9's "only the evaluator writes" rule.
+
+**Section 2.5 evaluator extended.** Gains schema-validator role (6th sub-function) plus self-reporting mandate. Evaluator is now the system's audit trail enforcer.
+
+**FM-17 added: Decision Report inflation / audit noise.** Continuous-monitor components risk drowning genuine decisions in routine noise. Mitigated by two-tier reporting and 30-day summarization of routine pings.
+
+**TBD-8 split** into TBD-8a (observation surface, consumer side, unchanged) and TBD-8b (Decision Report schema specifics, producer side, partially resolved at v1.1).
+
+**Section 9 component summary updated.** Decision Reports added as a third infrastructure subsystem alongside External World and Memory.
+
+**Cost note.** Decision Reports add ~10,500 tokens of audit material per typical 2-cycle Run. Storage policy and retention defaults are documented in section 2.8.
+
+### v1.1 → v1.2 (LOCKED — FINAL ARCHITECTURE)
+
+**Architecture phase closes here.** Twelve revisions, three named co-designers (Tue as integration layer + design critic; ChatGPT and Gemini as v0.1 contributors; Claude as drafting partner throughout). All TBDs resolved. Section 8 retained as historical record of decisions, not active TBD list.
+
+**Section 10 added: Implementation Strategy.** Acceptance-test-driven build, three test layers (acceptance primary, contracts defense-in-depth on interfaces, targeted unit tests on deterministic gnarly logic), twelve baseline acceptance scenarios locked, build order recommended (1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 11 → 12). Explicit anti-pattern rejection: mocking LLM-calling components defeats the purpose of testing this kind of system.
+
+**Principle 6 extended.** "Build quality into the process" gains an operational corollary: acceptance tests are upstream of code, not downstream. This is the testing equivalent of designing quality in. The full implementation strategy in section 10 is the operationalization of this principle.
+
+**Section 8 restructured.** Renamed from "Open design decisions" to "Design decision history (all resolved at v1.2)." Every TBD marked resolved with locked-at version. Summary statement: zero architecture work remaining.
+
+**Status line changed.** From "Design refined through N revisions, implementation pending" to "ARCHITECTURE LOCKED — design phase complete, implementation begins from this document."
+
+**What comes next is code.** This document is now reference, not draft. Edits beyond v1.2 happen only if implementation discovers an architectural assumption that doesn't hold — in which case the doc gets a v1.3 with a clear "discovered during implementation" entry. Refinements to the implementation strategy (more scenarios, better build orders) happen in section 10 without bumping major versions.
+
+**TBD-11 partially resolved (section 8).** Token estimation method and autocompact coordination locked. Monitoring mechanism and non-compact intervention thresholds remain v1 build work.
+
+**No new failure modes.** The two FM additions considered (Stop-hook misclassification, threshold-gap-too-narrow) folded into FM-10 update and section 2.4/2.7 prose. The architecture stays at 16 failure modes.
