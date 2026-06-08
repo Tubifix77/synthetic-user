@@ -2,7 +2,7 @@
 
 > A closed-loop control system that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure replacing the human roles that ordinarily sit around such a loop.
 
-**Status: IMPLEMENTATION-READY at v1.4.** (v1.2 locked the design; a v1.3 pre-build audit re-grounded the Claude Code dispatch on an MCP tool and closed eight holes — see architecture2.md section 2.9 and the changelog.)
+**Status: IMPLEMENTATION-READY at v1.5.** (v1.2 locked the design; a v1.3 pre-build audit re-grounded the Claude Code dispatch on an MCP tool and closed eight holes — see architecture2.md section 2.9 and the changelog.)
 
 ## What it is
 
@@ -31,7 +31,7 @@ The agentic loop itself — planning, tool use, code generation, verification �
 
 ## Architecture (v1.2 LOCKED)
 
-The buildable architecture lives in [architecture2.md](architecture2.md). Fourteen revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved) → v1.3 (pre-build audit: dispatch re-grounded on the consult_director MCP tool, integration surface specified, 8 holes closed) → v1.4 (current-science audit: autonomy edge, seeder hardening, Decision Reports as coordination backbone, steward degradation proxy).
+The buildable architecture lives in [architecture2.md](architecture2.md). Fifteen revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved) → v1.3 (pre-build audit: dispatch re-grounded on the consult_director MCP tool, integration surface specified, 8 holes closed) → v1.4 (current-science audit: autonomy edge, seeder hardening, Decision Reports as coordination backbone, steward degradation proxy) → v1.5 (multi-perspective evaluator: Layer 2 becomes a panel of perspective hats, resolving the validate-the-validator problem and supplying the autonomy dial's confidence signal).
 
 **Key concepts:**
 
@@ -40,7 +40,7 @@ The buildable architecture lives in [architecture2.md](architecture2.md). Fourte
 - **Hybrid synth-user dispatch** — proactive entry via `SessionStart` hook + reactive entry via `Stop` hook; uncorrelated failure modes covered by both paths
 - **Decision Reports** — every component documents its reasoning in a schema-validated stream, routed through the evaluator for memory persistence
 
-**Twenty named failure modes** cover the predictable ways the system fails — most are interaction failures between components rather than component-internal bugs.
+**Twenty-one named failure modes** cover the predictable ways the system fails — most are interaction failures between components rather than component-internal bugs.
 
 ## The hypothesis being tested
 

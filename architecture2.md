@@ -1,10 +1,10 @@
-# Synthetic User — Architecture v1.4 (IMPLEMENTATION-READY)
+# Synthetic User — Architecture v1.5 (IMPLEMENTATION-READY)
 
 **Status: IMPLEMENTATION-READY — design complete, the Claude Code integration mechanism is now specified (section 2.9), and all eight pre-implementation audit findings are resolved (section 8). Build begins from this document.**
 
 Twelve revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
 
-All design TBDs are resolved, and a v1.3 pre-implementation audit closed eight further holes (most importantly: the v1.0–v1.2 dispatch design assumed a Claude Code hook that does not exist; v1.3 re-grounds proactive dispatch on an MCP tool). Section 2.9 specifies exactly how the wrapper attaches to Claude Code. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the full decision history. v1.4 adds four refinements from a current-science audit (a fifth audit item is consciously deferred) — see section 8.
+All design TBDs are resolved, and a v1.3 pre-implementation audit closed eight further holes (most importantly: the v1.0–v1.2 dispatch design assumed a Claude Code hook that does not exist; v1.3 re-grounds proactive dispatch on an MCP tool). Section 2.9 specifies exactly how the wrapper attaches to Claude Code. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the full decision history. v1.4–v1.5 incorporate all five findings from a current-science audit — four adjustments in v1.4 and, in v1.5, a multi-perspective evaluator that resolves the last (the validate-the-validator problem) — see section 8.
 
 **What this is.** A closed-loop agent architecture that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure that replaces the human roles ordinarily sitting around such a loop. The framework does the cognitive work inside cycles; this project builds the substitutes for the human who would otherwise drive the framework from outside.
 
@@ -366,6 +366,29 @@ The Pass 3 verdict is returned to the framework. The cycle continues normally. R
 **Critical framing.** The evaluator is not in the loop. By the time it runs, the cycle is done. It cannot intervene — it can only learn.
 
 **Replaces what human did.** The human reviewing the session at the end, deciding what worked.
+
+**Layer 2 mechanism: multi-perspective evaluation (the panel of hats). [New in v1.5 — resolves audit issue 5.]**
+
+The hard problem (section 8): there is no ground truth to validate the evaluator's own judgments, and stacking a meta-evaluator to check the evaluator only moves the problem up a level (who validates the meta-evaluator?). v1.5 resolves this not by adding a layer but by making the evaluation itself multi-directional. Layer 2 — the LLM evaluation that fires only when Layer 1 rules flag an anomaly or a sub-threshold score — is a panel of perspectives ("hats"), each examining the deliverable from one defined angle and citing concrete evidence, with a final conclusion drawn from the panel.
+
+This **dissolves** the regress (a single deliberating pass adds no new layer to validate) rather than extending it. It does not manufacture ground truth — nothing can — but current science supports it: multi-agent debate evaluators (ChatEval, 2023) and panels of judges (PoLL, 2024) beat single judges on reliability and cost, and a 2025 result ("Judging with Many Minds") found that debating perspectives reduce bias while a meta-judge barely does — a direct endorsement of choosing this over a meta-layer.
+
+**The hats.** Three convene on every Layer 2 firing; three are situational:
+- **Correctness** (always) — did it do what it claimed? This is the outcome anchor: the Layer 1 rule results (tests passed, artifact exists) enter the panel as this hat's evidence.
+- **Adversary** (always) — what is wrong, missing, unverified, or faked; where does it break? The structural defense against reward-hacking (FM-3) and against CC having verified its own work.
+- **User-intent** (always) — does it serve what was actually wanted, not merely the literal request? The guard against technically-complete-but-worthless work.
+- **Maintainer** (situational) — sustainable, or a deferred problem?
+- **Pragmatist** (situational) — worth the cycles, or over-engineered?
+- **Integrator** (situational) — consistent with prior cycles, or silently contradicting them?
+
+**Three rules keep the panel real rather than theatrical:**
+1. **Model diversity, not just persona diversity.** The Adversary hat runs on a *different model family* from the others. Personas on a single model share that model's biases (self-preference, verbosity) under every hat; PoLL's bias-reduction benefit comes specifically from disjoint families. The other hats may share a model; the Adversary must not.
+2. **Evidence, not assertion.** Each hat must cite concrete evidence (a failing case, a missing requirement, a specific cost) for its judgment. Opinions converge toward the base model's prior; evidence does not. This is the primary defense against false consensus (FM-21).
+3. **Bounded aggregation.** The Adversary hat holds a *veto* on "did it actually work" (it cannot be outvoted into declaring success); the softer quality hats are combined by weighted judgment. The high-stakes axis stays mechanical; the nuanced axis stays flexible.
+
+**The panel pays for itself twice — disagreement is the confidence signal.** The spread across the hats is the evaluator's confidence number, which the autonomy dial (section 2.10) already consumes: consensus → high confidence → autonomous; divergence → low confidence → escalate. So multi-perspective evaluation resolves issue 5 *and* supplies a better-grounded confidence signal for issue 1 than anything specified there. It also retargets the one irreducible residue: the thin human spot-check samples the cases where the hats disagreed — where human judgment is most informative — rather than sampling at random.
+
+**Honest scope.** Prior art makes this proven, not novel (consistent with the composition-not-invention stance, section 7). Accuracy gain over a good single rubric-based judge is typically single-digit; the value here is regress-dissolution and the confidence signal, not raw accuracy. Layer 2 fires only on anomaly, so panel cost stays bounded; a deployer dial trades cost against bias-robustness (one model many hats ↔ full cross-family jury). New failure surface: hat-collapse (FM-21).
 
 ### 2.6 Memory system
 
@@ -834,6 +857,18 @@ The most important section. These are the predictable ways the system fails.
 - The action-pattern `PreToolUse` floor is independent of the dial, so the irreversible set stays gated even with the dial wide open.
 - Coupled to the deferred judge-self-validation item: the dial should not be widened aggressively until that calibration question has an answer.
 
+### Failure mode 21 (new in v1.5): Evaluation hat-collapse (false consensus)
+
+**Symptom.** The Layer 2 panel produces the appearance of multi-perspective deliberation, but the hats converge on the base model's prior — agreement that looks like a strong signal while carrying the same single-model bias the panel was meant to dilute. Worse than an honest single judge, because the false consensus inflates the confidence signal that feeds the autonomy dial (FM-20).
+
+**Cause.** Personas on one model role-play disagreement superficially, then revert to the model's prior. The evaluator-side mirror of FM-13 (the seeder's lens collapse).
+
+**Mitigation.**
+- The Adversary hat runs on a different model family — the panel's bias reduction comes from model diversity, not persona diversity.
+- Every hat must cite concrete evidence, not assert a stance; the aggregation discards evidence-free judgments.
+- The Adversary's veto on "did it work" cannot be overridden by consensus.
+- Disagreement rate is itself monitored: a panel that *never* disagrees is a finding (suspiciously consistent consensus is the signature of collapse).
+
 ## 7. What this is, restated
 
 It bears repeating because the framing matters:
@@ -852,7 +887,7 @@ Every TBD from the design phase is now resolved. This section retains the resolu
 
 **TBD-1b: Seeder cycle-boundary reflection structure.** Multi-lens reflection with six potential lenses (comparative, aspirational, creative, production, skeptical, user-perspective). Stop decision emerges from skeptical lens winning the synthesis. Extended in v0.9 with cycle preparation. Locked at v0.9.
 
-**TBD-2a: Evaluator learning mechanism.** Three-layer hybrid: rules-based scoring (Layer 1, always, cheap, deterministic), LLM attribution on anomaly only (Layer 2, Opus call when needed), classifier-based threshold tuning (Layer 3, scikit-learn on tabular features extracted from episodic memory). Resolved via research; pattern matches Skynet's RIPPER-based learned-rule quarantine. Resolved in research-findings (2026-05-18), locked at v1.2.
+**TBD-2a: Evaluator learning mechanism.** Three-layer hybrid: rules-based scoring (Layer 1, always, cheap, deterministic), LLM attribution on anomaly only (Layer 2, Opus call when needed), classifier-based threshold tuning (Layer 3, scikit-learn on tabular features extracted from episodic memory). Resolved via research; pattern matches Skynet's RIPPER-based learned-rule quarantine. Resolved in research-findings (2026-05-18), locked at v1.2. (v1.5 specifies the Layer 2 mechanism concretely as a multi-perspective panel of hats with model-diverse Adversary, evidence-forcing, and disagreement-as-confidence — see section 2.5.)
 
 **TBD-2b: Steering brain implementation.** Framework's reasoning as default + The Prompt with web search as Layer 6 escalation. Triple-check pattern (Pass 1 answer → Pass 2 critique with web search → Pass 3 reconciliation), dispatch lock prevents recursion. Locked at v0.3.
 
@@ -897,19 +932,23 @@ Two new failure modes were added for the re-grounded mechanism: **FM-18 (dispatc
 
 ### Resolved during the v1.4 current-science audit
 
-A research pass (2026-06-09) compared the architecture against the current (2025–2026) literature on multi-agent systems, LLM-as-judge, self-correction, context engineering, and agent reliability. The design held up well on mechanism, and was slightly ahead on two fronts (the evaluator's outcome-grounding versus the LLM-as-judge bias crisis; the steward matching Anthropic's long-horizon playbook). It surfaced five points of friction — four adjusted in v1.4, the fifth consciously deferred.
+A research pass (2026-06-09) compared the architecture against the current (2025–2026) literature on multi-agent systems, LLM-as-judge, self-correction, context engineering, and agent reliability. The design held up well on mechanism, and was slightly ahead on two fronts (the evaluator's outcome-grounding versus the LLM-as-judge bias crisis; the steward matching Anthropic's long-horizon playbook). It surfaced five points of friction — four adjusted in v1.4; the fifth resolved in v1.5 (see below).
 
 1. **No-human-in-the-loop is contrarian (adjusted).** Added a confidence-gated autonomy edge (section 2.10) — human at the loop's edge for rare high-stakes cases, configurable to fully open. New FM-20.
 2. **The seeder is the highest-risk component (adjusted).** Two literatures converge: intrinsic self-correction is unreliable (Huang et al.; Kamoi et al.), and LLM-simulated human judgment diverges from real humans ("Lost in Simulation", 2026). Hardened by isolation behind a hot-swappable interface, selection-over-generation grounding, and a human-agreement validation gate (section 2.1; acceptance scenario 15).
 3. **Conflicting decisions at control-surface seams (adjusted).** Cognition's "actions carry implicit decisions" risk. Decision Reports promoted from post-hoc audit to coordination backbone — every surface reads current-cycle reports before acting (sections 2.8, 2.1, 2.7).
 4. **Steward threshold measures fullness, not degradation (adjusted).** Context-rot research (Chroma) shows degradation is non-linear and content-dependent. Added a content-based degradation proxy as a second trigger alongside the token floor (sections 2.7, 2.9).
-5. **The evaluator's own judgments can't be fully validated (deferred — under discussion).** CMU's rating-indeterminacy result is a field-wide open problem with no clean fix. Consciously left as a "manage, not fix" item: scope Layer 2 attribution as a hint generator, anchor on outcomes where possible, add a thin human spot-check for calibration. Approach under active discussion; not yet specified in the architecture.
+5. **The evaluator's own judgments can't be fully validated (resolved in v1.5).** CMU's rating-indeterminacy result is a field-wide open problem with no clean fix — no design can manufacture ground truth. v1.5 instead makes Layer 2 evaluation multi-directional (a panel of hats; section 2.5), which dissolves the validate-the-validator regress rather than extending it, raises the reliability floor (ChatEval; PoLL), and emits the inter-hat disagreement as a confidence signal feeding the autonomy dial (2.10). The thin human spot-check survives, retargeted at the cases where the hats disagreed. New FM-21 (hat-collapse).
 
 Two of the four adjustments add no new component — they make existing components (Decision Reports; brain reversibility + evaluator confidence) do more. One new failure mode (FM-20) and one new acceptance scenario (15) were added. The architecture is now at **20 failure modes** and **15 baseline acceptance scenarios**.
 
+### Resolved in v1.5 (issue 5: evaluator self-validation)
+
+The one v1.4-deferred audit item is now resolved. Rather than evaluate the evaluator in a meta-layer (which only relocates the validation problem), Layer 2 evaluation is made multi-directional: a panel of perspective "hats" examines each anomalous deliverable, cites evidence, and a final conclusion is drawn with the Adversary hat holding veto on "did it work" (section 2.5). This dissolves the regress, raises the reliability floor per the multi-agent-evaluation literature (ChatEval 2023; PoLL 2024; "Many Minds" 2025), and emits inter-hat disagreement as the confidence signal the autonomy dial (2.10) needs — so the fix for issue 5 supplies the missing input for issue 1. Honest scope: proven technique, not novel; accuracy gain over a good single judge is modest; the value is regress-dissolution plus the confidence signal. One new failure mode (FM-21, hat-collapse). The architecture is now at **21 failure modes**; acceptance scenario 8 is extended to exercise the panel (scenario count stays at 15).
+
 ### Summary
 
-**Twelve design-phase TBDs, eight v1.3 audit findings, and four v1.4 science-audit adjustments (a fifth deferred). All resolved. Zero architecture work remaining — the system is implementation-ready.**
+**Twelve design-phase TBDs, eight v1.3 audit findings, and five v1.4–v1.5 science-audit items (four adjusted in v1.4, the fifth resolved in v1.5). All resolved. Zero architecture work remaining — the system is implementation-ready.**
 
 The buildable architecture is sections 1-7 (concept, components, data flow, design insight, design principles, failure modes, framing). The implementation path is section 10. The audit substrate is section 2.8. Everything else is context for understanding why decisions landed where they did.
 
@@ -981,7 +1020,7 @@ Fifteen scenarios. Listed in approximate order of complexity. Build order should
 
 **Scenario 7: Triple-check fires on hard call.** Cycle hits a genuinely ambiguous decision (e.g., "should this destructive operation proceed despite low confidence"). Brain's dispatch wrapper sets `in_triple_check`. Pass 1 produces an answer. Pass 2 critiques with web search. Pass 3 reconciles. Final verdict returned to CC. Dispatch lock prevents nested triple-checks during Passes 1-3. Verifies: Layer 6 sovereignty mechanism, dispatch lock under fire, web search integration.
 
-**Scenario 8: Evaluator catches anomaly, Layer 2 attribution fires.** Cycle completes but evaluator Layer 1 rules score below threshold. Layer 2 Opus attribution call fires, identifies the failing subsystem (e.g., "brain rubber-stamped a halt that should have been escalated"). Layer 3 classifier updates threshold weights. Failure flagged in episodic memory for future audit. Run continues to next cycle informed by the attribution. Verifies: three-layer evaluator hybrid, anomaly detection, attribution writing to failure memory.
+**Scenario 8: Evaluator catches anomaly, multi-hat Layer 2 fires.** Cycle completes but evaluator Layer 1 rules score below threshold. Layer 2 convenes the multi-perspective panel (Correctness, Adversary, User-intent core hats; Adversary on a different model family), each citing evidence; the Adversary identifies the failing subsystem (e.g., "brain rubber-stamped a halt that should have been escalated") and holds veto on "did it work". A final conclusion is drawn, and the inter-hat disagreement spread is emitted as the cycle's confidence signal feeding the autonomy dial (section 2.10). Layer 3 classifier updates threshold weights; the failure is flagged in failure memory. Also verify the panel does *not* false-consensus on a deliberately ambiguous deliverable (FM-21): the hats genuinely diverge and produce evidence. Verifies: three-layer hybrid, multi-hat Layer 2, model-diversity + evidence-forcing, disagreement→confidence wiring, attribution to failure memory.
 
 **Scenario 9: Decision Reports queryable end-to-end.** Run a representative scenario. Query the report store afterwards: "show all brain reports from this Run where triple_check_fired". Verify the returned reports match the runtime decisions, schema-validate, are flagged correctly. Verifies: report buffer flow, evaluator schema validation, query interface, schema completeness.
 
@@ -1143,3 +1182,17 @@ A research pass (2026-06-09) compared the architecture against the 2025–2026 l
 **Counts:** 20 failure modes (FM-20 added), 15 baseline acceptance scenarios (scenario 15 added), build order now 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
 
 **Still implementation-ready.** All four adjustments are refinements to a buildable design, not new blockers. Scenario 1 remains the starting point.
+
+### v1.4 → v1.5 (multi-perspective evaluator — resolves the deferred audit item)
+
+v1.4 deferred one audit finding: the evaluator cannot validate its own judgments (CMU rating-indeterminacy). v1.5 resolves it structurally. Instead of a meta-evaluator (which only relocates the problem), Layer 2 evaluation becomes multi-directional — a panel of perspective "hats" (Correctness, Adversary, User-intent always; Maintainer, Pragmatist, Integrator situationally), each citing evidence, with bounded aggregation (Adversary veto on "did it work"). Section 2.5.
+
+Three rules keep the panel honest: the Adversary hat runs on a different model family (bias reduction comes from model diversity, not persona diversity — PoLL); every hat cites concrete evidence (opinions converge, evidence does not); disagreement rate is monitored (suspicious consensus = collapse).
+
+The payoff is double: it dissolves the validate-the-validator regress (no new layer), and the inter-hat disagreement spread becomes the confidence signal the autonomy dial (2.10) consumes — so issue 5's fix supplies issue 1's missing input. The surviving human spot-check is retargeted at hat-disagreements.
+
+Honest framing: this is established technique (ChatEval 2023; PoLL 2024; "Many Minds" 2025), not novel — consistent with the architecture's composition-not-invention stance. Accuracy gain over a good single judge is modest; the value is regress-dissolution and the confidence signal. Layer 2 fires only on anomaly, so panel cost stays bounded.
+
+New failure mode FM-21 (hat-collapse / false consensus). Architecture now at **21 failure modes**; scenario 8 extended to exercise the panel (15 scenarios unchanged).
+
+**Architecture status: all five current-science-audit findings are addressed (four adjusted in v1.4, one resolved in v1.5); all design TBDs are resolved. The v1 design is complete — what remains is building it.**
