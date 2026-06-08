@@ -1,0 +1,19 @@
+[project]
+name = "synthetic-user"
+version = "0.0.1"
+description = "Closed-loop synthetic-user control wrapper around Claude Code"
+requires-python = ">=3.11"
+dependencies = []
+# Runtime deps are intentionally empty for the walking skeleton.
+# Deferred until scenarios demand them:
+#   - real Claude Code integration: via subprocess `claude -p` (no SDK/API key)
+#   - SQLite memory: stdlib (sqlite3)
+#   - vector memory: chromadb or faiss  (scenario 8+ / memory consolidation)
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
