@@ -1,0 +1,62 @@
+[
+  {
+    "id": "s15-001",
+    "description": "Simple one-liner task, clearly done after one cycle",
+    "request_goal": "write a hello world script",
+    "cycle_index": 0,
+    "deliverable_content": "print('Hello, world!')",
+    "score_passed": true,
+    "score_value": 0.9,
+    "human_verdict": "complete"
+  },
+  {
+    "id": "s15-002",
+    "description": "Complex build task on cycle 0: working but edge cases untested",
+    "request_goal": "build a CSV deduplicator",
+    "cycle_index": 0,
+    "deliverable_content": "def deduplicate(rows): return list({tuple(r.items()) for r in rows})",
+    "score_passed": true,
+    "score_value": 0.9,
+    "human_verdict": "continue"
+  },
+  {
+    "id": "s15-003",
+    "description": "Complex build task on cycle 1: edge cases addressed, ready to ship",
+    "request_goal": "build a CSV deduplicator",
+    "cycle_index": 1,
+    "deliverable_content": "def deduplicate(rows): ...\ndef test_empty(): ...\ndef test_all_dupes(): ...",
+    "score_passed": true,
+    "score_value": 0.95,
+    "human_verdict": "refinement_complete"
+  },
+  {
+    "id": "s15-004",
+    "description": "Complex implementation on cycle 0: functional but not yet stress-tested",
+    "request_goal": "implement a REST API",
+    "cycle_index": 0,
+    "deliverable_content": "from flask import Flask; app = Flask(__name__); @app.route('/') ...",
+    "score_passed": true,
+    "score_value": 0.88,
+    "human_verdict": "continue"
+  },
+  {
+    "id": "s15-005",
+    "description": "Complex implementation on cycle 1: error handling and tests added",
+    "request_goal": "implement a REST API",
+    "cycle_index": 1,
+    "deliverable_content": "...with error handlers, auth stub, and integration tests",
+    "score_passed": true,
+    "score_value": 0.92,
+    "human_verdict": "refinement_complete"
+  },
+  {
+    "id": "s15-006",
+    "description": "Algorithmically complex task — human sees it needs adversarial tests; stub misses",
+    "request_goal": "write a sorting algorithm",
+    "cycle_index": 0,
+    "deliverable_content": "def quicksort(arr): if len(arr) <= 1: return arr ...",
+    "score_passed": true,
+    "score_value": 0.9,
+    "human_verdict": "continue"
+  }
+]
