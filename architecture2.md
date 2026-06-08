@@ -1,10 +1,10 @@
-# Synthetic User — Architecture v1.2 (LOCKED)
+# Synthetic User — Architecture v1.3 (IMPLEMENTATION-READY)
 
-**Status: ARCHITECTURE LOCKED — design phase complete. Implementation begins from this document.**
+**Status: IMPLEMENTATION-READY — design complete, the Claude Code integration mechanism is now specified (section 2.9), and all eight pre-implementation audit findings are resolved (section 8). Build begins from this document.**
 
 Twelve revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
 
-All design TBDs are resolved. Residual work is implementation, not architecture. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the TBD history as a record of decisions made.
+All design TBDs are resolved, and a v1.3 pre-implementation audit closed eight further holes (most importantly: the v1.0–v1.2 dispatch design assumed a Claude Code hook that does not exist; v1.3 re-grounds proactive dispatch on an MCP tool). Section 2.9 specifies exactly how the wrapper attaches to Claude Code. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the full decision history.
 
 **What this is.** A closed-loop agent architecture that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure that replaces the human roles ordinarily sitting around such a loop. The framework does the cognitive work inside cycles; this project builds the substitutes for the human who would otherwise drive the framework from outside.
 
@@ -21,16 +21,21 @@ This architecture wraps Claude Code (v1 reference framework). Where our componen
 | Tool call | Tool call | One tool invocation (read, edit, bash, etc.). CC fires `PreToolUse`/`PostToolUse` hooks around it. |
 | Cycle | **Turn** | One complete cycle from CC's perspective: user message in → reasoning → N tool calls → final response. May contain 15–20 tool calls. `Stop` hook fires at the end. |
 | Run | (no CC equivalent) | One bounded Synthetic User goal-pursuit. One or more cycles/turns, terminates on seeder stop code. Lives entirely in the wrapper layer. |
-| (Synthetic User has no concept above Run) | Session | One CC `session_id`, with its own transcript at `~/.claude/projects/`. Begins with `SessionStart` hook. May host one Run, multiple Runs, or partial Runs. |
+| (Synthetic User has no concept above Run) | Session | One CC `session_id`, with its own transcript at `~/.claude/projects/`. Begins with `SessionStart` hook. **v1 maps exactly one Run to one session** (see rule below). |
 
 **Why two terms for one thing (cycle/turn).** "Cycle" describes the Synthetic User wrapper's view: seeder generates prompt → framework executes → evaluator scores. "Turn" describes CC's view: user-prompt-to-final-response. They refer to the same boundary from different sides. Throughout this doc, "cycle" is used when describing wrapper-level flow; "turn" when describing CC's internal lifecycle (hooks, compaction, etc.).
 
-**CC hook surface used by this architecture:**
+**Run ↔ session mapping (resolved v1.3): one Run = one CC session.** A Run's cycles are consecutive turns inside a single CC session. The orchestrator opens a session when a Run begins, drives turn N+1 by submitting the seeder's next-cycle goal as a new prompt to that same session, and ends the session when the seeder stops the Run. The earlier table language ("a session may host multiple Runs") described a future optimization; v1 is strictly one Run per session, which keeps session lifecycle, transcript scope, and hook installation unambiguous.
 
-- `UserPromptSubmit` (fires when a new prompt enters CC) — proactive entry point for synth-user dispatch and cycle preparation
-- `PreToolUse` / `PostToolUse` (fires around each tool call) — action-pattern trigger surface for the steering brain
-- `Stop` (fires at the end of every turn, cannot be skipped, even `--dangerously-skip-permissions` doesn't disable it) — reactive entry point for evaluator AND fallback for synth-user dispatch when the proactive path didn't fire
-- `SessionStart` (fires when a new CC session begins) — used for initial pre-prompt instruction injection
+**CC integration surface used by this architecture.** The wrapper attaches to Claude Code through exactly two CC-native extension mechanisms — **hooks** and **one MCP tool**. Section 2.9 specifies the full surface; the summary:
+
+- **`consult_director` MCP tool** — the *proactive* synth-user dispatch. CC is instructed (at session start) to call this tool instead of asking the user; the call is synchronous, so the brain answers in-turn with no halt. This replaces the v1.0–v1.2 `[steering-director:]` string-emission idea, which assumed a hook that fires on arbitrary mid-turn text (no such hook exists).
+- `Stop` (fires at the end of every turn, cannot be skipped) — evaluator entry point AND the *reactive* synth-user fallback. When CC asked the user instead of calling the tool, the Stop handler classifies the message and, if it is a halt, returns block-with-reason so CC continues in the same session.
+- `PreToolUse` (fires before each tool call) — action-pattern trigger surface for the steering brain (allow / deny / inject-context).
+- `PostToolUse` (fires after each tool call) — the context steward's monitoring and intervention surface (per-tool-call granularity, not mid-thought).
+- `PreCompact` (fires before CC's own compaction) — lets the steward supply preservation guidance to CC's built-in autocompact.
+- `SessionStart` (fires when the orchestrator opens a session for a Run) — injects the `consult_director` instruction and any standing deployment rules.
+- `UserPromptSubmit` (fires when the orchestrator submits a prompt) — how the orchestrator starts each cycle's turn within the session.
 
 ## 1. Core concept
 
@@ -80,7 +85,7 @@ For v1, the framework is Claude Code. The wrapper would work over Cursor, Aider,
 - **Triage gate.** Sits in front of the framework, routes incoming requests to loop / direct-handle / reject.
 - **Cycle wrapper / orchestrator.** Runs the framework in cycles instead of one-shot sessions. Handles handoff between cycles, session lifecycle, applies cycle preparation from the seeder, terminal output to goal source.
 - **Seeder reflection + preparation logic.** A multi-lens reflection that runs at the cycle boundary, performs creative review, and either generates the next cycle's goal (with cycle preparation: specificity, tool config, subagent opportunities) or stops the session.
-- **Steering brain dispatch.** The intercept that catches the framework's `[steering-director:]` emissions, holds the triple-check lock, invokes The Prompt when escalation is needed, returns verdicts. The framework handles most situations on its own; the brain dispatch only fires when the framework itself would have asked.
+- **Steering brain dispatch.** The logic behind the `consult_director` MCP tool and the `Stop`/`PreToolUse` hook handlers (section 2.9): it holds the triple-check lock, invokes The Prompt when escalation is needed, and returns verdicts. The framework handles most situations on its own; the brain dispatch only fires when the framework would have asked the user or is about to take a registered action.
 - **Context steward.** Continuous monitor of framework context state during cycle execution. Intervenes when context quality is at risk — suggests compact, clear, delegate to subagent, or interrupt. Runs in parallel with the framework; goes quiet when context is healthy.
 - **Evaluator.** Post-hoc analyzer that scores cycles, attributes failure, updates trigger weights and brain priors, consolidates memory. The largest single new build.
 
@@ -136,6 +141,8 @@ This inventory is the honest scope of new work for v1. Six things to build. Thre
 **The seeder is one activity, not two.** Earlier architecture versions framed the seeder as "review then generate" — two distinct steps. v0.8 recognized that real creative reflection produces direction as a natural consequence. The decision (continue / stop / what direction) emerges from the reflection rather than being a separate downstream step. v0.9 extends this further: when the seeder decides to continue, it also produces cycle preparation as part of the same reflection — the lenses that identified the next direction also identified how the cycle should be configured to pursue it efficiently.
 
 **At cycle 0 (cold start):** Pure pass-through with minimal preparation. The triage gate has already validated the request. The seeder hands the goal to the framework verbatim, optionally with default cycle preparation if the deployment has standing rules (e.g., default MCP set). No reflection at cycle 0 — there is no prior cycle to reflect on.
+
+**Evaluation-criteria source (resolved v1.3).** The evaluator scores against *declared* criteria, so something must declare them. At **cycle 0**, the cycle wrapper prepends a one-line criteria-declaration step to the goal: CC is asked to state explicit done-when conditions before beginning work ("before starting, list the concrete conditions that would make this task complete"). The orchestrator captures that declaration and hands it to the evaluator as cycle 0's criteria. At **cycle N>0**, the seeder's cycle preparation carries the criteria for that cycle — the lenses that identified the next direction also define what "done" means for it. This closes the gap where cycle 0 would otherwise have no criteria beyond "a deliverable exists."
 
 **At cycle boundaries (after cycle N completes, before cycle N+1):** Multi-lens reflection + cycle preparation.
 
@@ -225,9 +232,9 @@ These three preparation tasks are part of the same reflection pass — the seede
 
 **Implementation.** Entirely the framework's job. For v1, Claude Code. Nothing in this section is new code.
 
-**Pre-prompt instruction (proactive entry).** Every CC session begins with the universal trigger instruction, injected via the `SessionStart` hook: *when you would have asked the user a question to proceed, instead emit `[steering-director: <your question>]` and continue based on the response you receive.* This is the one-sentence rule that converts every framework doubt into a steering brain invocation. CC reads this at session start and ideally honors it for the session's duration.
+**Pre-prompt instruction (proactive entry, re-grounded v1.3).** Every CC session begins with the universal trigger instruction, injected via the `SessionStart` hook: *when you would have asked the user a question to proceed, instead call the `consult_director` MCP tool with your question and current context, and continue based on the result it returns.* Because MCP tool calls are synchronous request–response, the brain answers in-turn and CC never halts. This replaces the v1.0–v1.2 `[steering-director:]` design, which assumed a hook firing on arbitrary mid-turn text; no such hook exists (see section 2.9).
 
-**Why this needs a backup (Stop-hook router, section 2.4).** Pre-prompt instructions degrade as CC's context compresses across many turns. By turn 30+ in a long run, the SessionStart instruction may have been compacted away or its salience faded. The reactive `Stop`-hook path catches halts that slip through. Both paths share dispatch logic; only the entry point differs.
+**Why this needs a backup (Stop-hook router, section 2.4).** The SessionStart instruction degrades as CC's context compresses across many turns; by turn 30+ in a long run its salience may fade and CC may simply ask the user instead of calling the tool. The reactive `Stop`-hook path catches those: the Stop handler classifies the final message and, if it is a halt, returns block-with-reason so CC continues in the same session with the brain's answer injected. Both paths share dispatch logic; only the entry point differs.
 
 **Subcomponents (provided by the framework, not built):**
 - Planner
@@ -264,9 +271,9 @@ These three preparation tasks are part of the same reflection pass — the seede
 
 **Trigger surfaces.** The brain is invoked from three kinds of triggers, mapped to CC's hook surface. Each entry point feeds the same brain logic with the same normalized payload.
 
-**Trigger Type 1 (proactive): Framework doubt, caught in-turn.** CC's `SessionStart` hook injects a pre-prompt instruction: *when you would ask the user a question, dispatch to the synth-user component first.* If CC respects this, the dispatch happens mid-turn before any halt. The brain receives the question, returns a verdict, CC continues without halting. This is the cheap, common case.
+**Trigger Type 1 (proactive): Framework doubt, caught in-turn via the `consult_director` MCP tool.** The `SessionStart` instruction tells CC to call `consult_director(question, context)` instead of asking the user. CC calls it mid-turn; the call blocks; the orchestrator runs the brain; the verdict returns as the tool result; CC continues without halting. Synchronous MCP semantics make this the cheap, common case. (This is the v1.3 correction of the original "emit a magic string a hook catches" design — see section 2.9.)
 
-**Trigger Type 2 (reactive): Framework doubt, caught at turn end.** When the proactive path fails (context drift late in session, CC ignored the pre-prompt, halt language CC emits doesn't match the proactive instruction pattern), CC ends the turn with a halt disguised as a final response ("I need to ask..."). The `Stop` hook fires. The **Stop-hook router** (sub-mechanism, below) classifies the response: if halt-language is detected, route to brain; else route to evaluator. The brain handles the halt, the cycle wrapper synthesizes a follow-up `UserPromptSubmit` carrying the answer, CC restarts. The original "turn" becomes two turns from CC's perspective but one logical step from the Run's perspective.
+**Trigger Type 2 (reactive): Framework doubt, caught at turn end.** When the proactive path fails (CC ignored the SessionStart instruction and just asked the user), CC ends the turn with a halt disguised as a final response ("I need to ask..."). The `Stop` hook fires. The **Stop-hook router** (sub-mechanism, below) classifies the final message: if it is a halt, route to brain; else route to evaluator. The brain produces a verdict and the Stop handler returns `{"decision": "block", "reason": "<verdict>"}` — CC's native Stop-hook semantics inject the reason and **continue the same session** (no new prompt is synthesized). This corrects the earlier description, which alternately called the resume a "synthesized follow-up `UserPromptSubmit`"; the real mechanism is block-and-continue.
 
 **Trigger Type 3: Action pattern match.** A registered action-pattern skill detects CC is about to perform an action of interest (matched via CC's `PreToolUse` hook). The skill routes to the brain. The brain receives the about-to-happen action and returns proceed/redirect/halt.
 
@@ -321,7 +328,7 @@ When Layer 6 fires from a top-level escalation:
 
 The Pass 3 verdict is returned to the framework. The cycle continues normally. Reality validates post-hoc via the evaluator.
 
-**Recursion protection: the dispatch lock.** A binary `in_triple_check` flag held by the dispatch wrapper prevents nested triple-checks. While held, Layer 6 fires from inside Pass 1/2/3 contribute content but do not bootstrap new triple-checks.
+**Recursion protection: the dispatch lock.** A binary `in_triple_check` flag held by the dispatch wrapper prevents nested triple-checks. While the lock is held, any Layer 6 escalation arising inside Pass 1, 2, or 3 contributes its content to the current pass but does not bootstrap a new nested triple-check.
 
 **Recording for the evaluator.** Each triple-check fire is flagged in episodic memory.
 
@@ -337,9 +344,9 @@ The Pass 3 verdict is returned to the framework. The cycle continues normally. R
 
 ### 2.5 Evaluator (post-hoc learner)
 
-**Function.** Runs once per cycle, after the cycle completes. Six sub-functions:
+**Function.** Runs once per cycle, after the cycle completes. Seven sub-functions:
 
-1. **Reliability evaluation.** Scores the cycle against declared criteria.
+1. **Reliability evaluation.** Scores the cycle against declared criteria. (Criteria source resolved in v1.3: cycle 0's criteria come from CC's own done-when declaration captured by the wrapper; cycle N>0's criteria come from the seeder's cycle preparation — see section 2.1.)
 2. **Failure attribution.** When something went wrong, identifies which subsystem caused it.
 3. **Trigger set adjustment.** Updates the action-pattern skill set.
 4. **Brain prior adjustment.** Updates the steering brain's resolution priors.
@@ -373,9 +380,9 @@ Split into four distinct stores.
 
 **Function.** Continuously tracks framework context state during cycle execution. Intervenes when context quality is at risk. Runs in parallel with the framework throughout each cycle; goes quiet when context is healthy.
 
-**Operational model.** Distinct from all other components. The triage gate fires once per request. The seeder fires at cycle boundaries. The steering brain fires on triggers (framework doubt or action pattern). The evaluator fires once per cycle close. **The context steward runs continuously** during cycle execution, polling or hooking into framework state to monitor context utilization, recent additions, and content patterns.
+**Operational model (mechanism corrected v1.3).** Distinct from all other components. The triage gate fires once per request. The seeder fires at cycle boundaries. The steering brain fires on triggers. The evaluator fires once per cycle close. **The context steward fires on every tool call**, via CC's `PostToolUse` hook — the finest grain CC exposes to an external observer. The earlier framing ("runs continuously, catches degradation mid-thought, mid-reasoning") was aspirational; CC offers no live mid-turn context API, so the real cadence is per-tool-call. In a turn of 15–20 tool calls this is frequent enough to track context growth and intervene before CC's own autocompact fires.
 
-This continuous operation is what makes the steward its own component rather than a folded responsibility. Context can fill or degrade at any moment — mid-thought, mid-tool-call, mid-reasoning — and the natural response moments for the other components (boundaries, triggers, post-hoc) all miss the in-the-moment quality of context state.
+The steward is still its own component (it meets Principle 1's bar: distinct cadence, distinct cost profile, non-foldable), but it is realized as a sequence of short `PostToolUse` hook invocations updating an orchestrator-owned token counter, not as a separate process polling CC.
 
 **Inputs.**
 - Framework's current context state (utilization percentage, recent additions, accumulated history)
@@ -407,7 +414,7 @@ Rule: **steward intervenes before CC's autocompact would fire, never after.** Co
 
 The 60% / 80% relationship is a v1 build-time constant pair (tunable per deployment). If CC's autocompact fires anyway (steward missed it, threshold drifted, run exceeded estimates), the steward's other interventions — `suggest_delegate`, `suggest_interrupt` — remain orthogonal to autocompact and continue functioning. Only `suggest_compact` is at risk of double-firing with CC, and the threshold gap is the mitigation.
 
-**Implementation note.** Could be a thin LLM-based monitor (small model, narrow prompt, runs periodically), or partially rule-based (utilization thresholds trigger rule-based checks, LLM only for ambiguous cases). v1 hybrid is likely best — rules for clear thresholds (>80% utilization → suggest compact), LLM for nuance (is this exploration polluting main context, or is it core to the goal?).
+**Implementation note (mechanism, v1.3).** The four interventions map to real CC mechanisms (full detail in section 2.9): `suggest_compact` = the `PostToolUse` handler returns preservation guidance as injected `additionalContext` so CC self-summarizes in-turn, backed by a `PreCompact` hook that supplies the same guidance to CC's own autocompact; `suggest_delegate` = `additionalContext` suggesting CC spawn a subagent (Task tool) for upcoming bounded work; `suggest_interrupt` = best-effort, the handler sets an interrupt flag that the next `PreToolUse` hook reads and denies, ending the cycle at the next tool boundary (true mid-turn interruption is not possible); routine pings = a counter update plus a minimal Decision Report, no CC-visible action. The threshold/nuance split (rules for the 60% line, a small LLM for "is this exploration core or pollution") still applies, evaluated inside the handler.
 
 **Cost note.** The only component that runs continuously. Cost matters more here than for other components. Should be the smallest viable model (Haiku-tier in v1 reference). Invoked periodically (every N framework steps, or every M seconds, or hook-based on context state changes) rather than per-token.
 
@@ -496,6 +503,33 @@ The UI for these queries (CLI, dashboard, notebook integration, scheduled summar
 
 **Replaces what human did.** The human writing post-mortem notes after each AI session: "the agent chose X, considered Y and Z, picked X because [reasoning], I disagreed but let it run." Decision reports are that note, generated by the components themselves, in a form that aggregates across many runs.
 
+### 2.9 Integration surface — how the wrapper attaches to Claude Code
+
+This section is new in v1.3. It exists because the v1.0–v1.2 dispatch design described mechanisms that do not map to Claude Code's real extension points (a hook firing on a mid-turn magic string; an external process compacting CC mid-turn; "continuous" context monitoring). v1.3 re-grounds every wrapper–CC interaction on the two mechanisms CC actually provides: **hooks** and **MCP tools**.
+
+**The orchestrator process.** A single long-lived process (`core/orchestrator.py`) is the spine. It runs the triage gate, spawns and manages CC sessions (one per Run), and owns all persistent state: the memory DB connection, the per-Run Decision Report buffer, the steward's token-counter state, the dispatch lock, and the interrupt flag. It hosts the brain, seeder, steward logic, and evaluator as in-process modules. It exposes a local IPC endpoint (Unix socket / named pipe / localhost TCP) that the hook handlers and the MCP server call into. **All judgment lives in the orchestrator; the hooks and the MCP tool are thin plumbing that forward a CC event and translate the orchestrator's decision back into the response CC expects.**
+
+**Proactive brain entry — the `consult_director` MCP tool.** The wrapper ships a small MCP server exposing one tool, `consult_director(question, context)`. The `SessionStart` instruction tells CC to call it instead of asking the user. CC calls it mid-turn, the call blocks (MCP calls are synchronous), the orchestrator runs the brain, and the verdict returns as the tool result. CC reads it and continues — no halt, no turn boundary. This is the common case and is why the proactive path is cheap.
+
+**Reactive brain entry + evaluator entry — the `Stop` hook.** Fires at the end of every turn. The handler reads the final assistant message and runs the Stop-hook router (rules → Haiku → default-to-completion). If the message is a halt (CC asked the user instead of calling the tool), the handler invokes the brain and returns `{"decision": "block", "reason": "<verdict>"}`; CC's native semantics inject the reason and continue the **same** session. If it is a genuine completion, the handler returns nothing and the orchestrator routes the turn to the evaluator, then the seeder. (No `UserPromptSubmit` is synthesized to resume — block-and-continue is the native mechanism.)
+
+**Action-pattern brain entry — the `PreToolUse` hook.** Fires before each tool call. The handler matches the pending call against the four registered action patterns (`git_push_to_public_repo`, `claim_done`, `add_dependency`, `modify_schema`). On a match it invokes the brain and maps the verdict to PreToolUse semantics: `proceed` → allow, `redirect` → allow with injected `additionalContext` pointing at the context to re-read, `halt` → deny with reason. On no match it allows immediately.
+
+**Context steward — the `PostToolUse` + `PreCompact` hooks.** The `PostToolUse` handler fires after each tool call, updates the orchestrator-owned token counter (tool-result size + running total), and evaluates the 60% threshold. Interventions: `suggest_compact` returns preservation guidance as injected `additionalContext` (CC self-summarizes in-turn); a `PreCompact` hook supplies the same guidance to CC's own autocompact as a safety net; `suggest_delegate` injects a suggestion to spawn a subagent; `suggest_interrupt` sets an interrupt flag that the next `PreToolUse` hook reads and denies, ending the cycle at the next tool boundary. Granularity is per-tool-call, not mid-thought.
+
+**`SessionStart` hook.** Fires when the orchestrator opens a session for a Run. Injects the `consult_director` instruction and any standing deployment rules.
+
+**State across hook invocations.** Each hook invocation is a fresh OS process, so anything that must survive between calls lives in orchestrator-owned state reached over IPC (or, for the simplest v1, small per-Run JSON state files the handlers read/write): the token counter, the dispatch lock, the interrupt flag, the report buffer. No hook holds durable state in its own memory.
+
+**Concurrency / memory-access model (resolves the audit's concurrency hole).** Because the steward is a sequence of short hook invocations rather than a separate polling process, and because Decision Reports accumulate in the orchestrator's in-memory buffer rather than being written by each component, **the memory DB has exactly one writer: the evaluator, running single-threaded at cycle close inside the orchestrator.** Readers (brain, seeder) query through the orchestrator's single owned connection. Hook handlers never open the DB directly — they talk to the orchestrator over IPC. With no cross-process SQLite access, the WAL-vs-DELETE journaling question that bit earlier projects on bind mounts does not arise; v1 uses one connection owned by the orchestrator. (This is the deliberate fix for the "continuous parallel steward + SQLite" contention the audit flagged.)
+
+**External dependencies (pinned in v1.3).**
+
+- **The Prompt.** The seeder, brain Layer 6, and triage Stage 3 invoke The Prompt (the-prompt-to-rule-them-all). For v1 it is **vendored** into the repo at a pinned commit (`vendor/the-prompt/PROMPT.md`), not referenced externally, so the build is reproducible. Invocation (`core/prompt/invoke.py`): load the vendored text, prepend it as the system prompt, call the Anthropic API — Sonnet for routine seeder/triage use, Opus for Layer 6 triple-check. Updating the vendored copy is a deliberate, version-bumped action.
+- **Web search backend.** Components that "use web search" (brain Layer 6 Pass 2, seeder comparative lens, triage Stage 3) call a pluggable interface (`core/search/backend.py`), never a hardcoded provider. v1 default is the deployer's available search. In internet-restricted environments the backend routes through a local proxy (e.g., a proxy MCP) — the expected configuration on the reference build machine.
+
+**What is NOT assumed.** No ability to read CC's live token state mid-turn (only per-tool-call estimates). No ability to force a `/compact` inside a running turn (only injected guidance + the PreCompact safety net). No hook that fires on arbitrary model text mid-turn (the MCP tool replaces that need). No second concurrent writer to memory. If a future CC version adds richer surfaces, the wrapper can use them, but v1 depends only on what is listed here.
+
 ## 3. Data flow
 
 Each request goes through the triage gate first; loop-worthy requests then proceed through cycles bounded by the seeder's reflections, with the context steward monitoring throughout.
@@ -516,8 +550,8 @@ The triage decision is logged regardless of route.
    - 4a. For each action, check action-pattern triggers.
      - Match → **steering brain fires (trigger type 2)** → verdict → framework proceeds/redirects/halts
      - No match → action proceeds
-   - 4b. If the framework would have asked the user a question, it emits `[steering-director:]`.
-     - **Steering brain fires (trigger type 1)** → verdict → framework reads as reply
+   - 4b. If the framework would have asked the user a question, it calls the `consult_director` MCP tool instead (proactive path).
+     - **Steering brain fires (trigger type 1)** → verdict returns as the tool result → framework continues in-turn. (If CC instead just asks, the `Stop` hook catches it reactively — trigger type 2.)
    - 4c. Actions hit the external world; results, errors, state changes come back.
 
 **Throughout the cycle (parallel track).**
@@ -733,6 +767,30 @@ The most important section. These are the predictable ways the system fails.
 - Query interface biases toward full reports (minimal pings filtered out unless explicitly requested)
 - Evaluator audits the audit substrate itself: if reports stop being read, that's a finding
 
+### Failure mode 18 (new in v1.3): Dispatch escape
+
+**Symptom.** CC neither calls `consult_director` nor emits halt-language the Stop-hook router can detect — it makes a consequential assumption silently and proceeds, and the router classifies the turn as a clean completion.
+
+**Cause.** The proactive SessionStart instruction faded under context compression AND the implicit halt was phrased so it didn't match the router's rule/Haiku patterns. Both layers of the hybrid missed the same event.
+
+**Mitigation.**
+- The evaluator's post-hoc audit flags turns where CC made a consequential, low-reversibility decision with no `consult_director` call on record; persistent escapes tighten the SessionStart instruction and the router's rule set.
+- The `PreToolUse` action-pattern triggers still catch the irreversible subset (public push, dependency add, schema change, done-claim) regardless of whether CC consulted the brain — so the highest-stakes escapes are caught on a separate mechanism.
+- This is the explicitly accepted residual risk of trusting the loop (Principle 5): the system tolerates silent low-stakes assumptions and relies on reality + the evaluator to surface the costly ones.
+
+### Failure mode 19 (new in v1.3): Hook handler failure leaves CC unsupervised
+
+**Symptom.** A hook handler crashes, times out, or the orchestrator IPC endpoint is unreachable; CC proceeds for that event with no steering, steward, router, or action-pattern coverage.
+
+**Cause.** Hooks are external processes that can fail independently of CC. A wrapper that assumes its handlers always run would silently lose supervision exactly when something is already wrong.
+
+**Mitigation — every handler fails safe, in the safe direction for its event:**
+- `PreToolUse` crash → allow for non-action-pattern tools, **deny** for the four registered action patterns (fail closed on the irreversible set).
+- `Stop` crash → let CC stop and route the turn to the evaluator (never trap CC in a blocked-stop loop).
+- `PostToolUse` crash → skip the steward update for that step (lose one data point, not the cycle).
+- `consult_director` unreachable → the tool returns an explicit "director unavailable, use your best judgement and note the assumption" result, which the evaluator later audits.
+- Every handler failure is logged as a finding; repeated failures raise a yellow flag. The orchestrator exposes a health endpoint the handlers ping, so a dead orchestrator is detected rather than silently degrading.
+
 ## 7. What this is, restated
 
 It bears repeating because the framing matters:
@@ -741,9 +799,9 @@ It bears repeating because the framing matters:
 - **Not safety research.** The components optimize reliability, not alignment.
 - **Not novel in any single component.** Actor-critic, self-play, reflection, tool use, persistent memory, multi-perspective evaluation, context management — all of these exist. The contribution, if any, is in the specific composition: the decomposition of "the human in the loop" into roles, the substitution of named components for the roles that need building, the inheritance of the rest from the framework.
 - **Not human-in-the-loop.** A standard agentic-workflow framing positions the human as a governor reviewing the agent's plan before execution. The synthetic-user architecture deliberately rejects this. The triage gate is the only place a human can be involved, and it sits *before* the loop runs, not as a checkpoint inside it. Once the gate accepts the request, the system runs to completion without human approval at any intermediate step. Safeguards are structural (multi-lens reflection, context monitoring, external grounding, post-hoc evaluator learning) rather than procedural.
-- **Not finished.** This is v0.9. Six TBDs remain open.
+- **Not finished, but implementation-ready.** This is v1.3. All design TBDs are resolved (section 8) and the Claude Code integration mechanism is specified (section 2.9). What remains is building it against the acceptance scenarios in section 10.
 
-## 8. Design decision history (all resolved at v1.2)
+## 8. Design decision history (all resolved)
 
 Every TBD from the design phase is now resolved. This section retains the resolution record so future maintainers understand *why* each decision landed where it did. No architecture work remains.
 
@@ -751,7 +809,7 @@ Every TBD from the design phase is now resolved. This section retains the resolu
 
 **TBD-1b: Seeder cycle-boundary reflection structure.** Multi-lens reflection with six potential lenses (comparative, aspirational, creative, production, skeptical, user-perspective). Stop decision emerges from skeptical lens winning the synthesis. Extended in v0.9 with cycle preparation. Locked at v0.9.
 
-**TBD-2a: Evaluator learning mechanism.** Three-layer hybrid: rules-based scoring (Layer 1, always, cheap, deterministic), LLM attribution on anomaly only (Layer 2, Opus call when needed), classifier-based threshold tuning (Layer 3, scikit-learn on tabular features extracted from episodic memory). Resolved via research; pattern matches Skynet's RIPPER-based learned-rule quarantine. Locked at v1.2 (research-findings doc).
+**TBD-2a: Evaluator learning mechanism.** Three-layer hybrid: rules-based scoring (Layer 1, always, cheap, deterministic), LLM attribution on anomaly only (Layer 2, Opus call when needed), classifier-based threshold tuning (Layer 3, scikit-learn on tabular features extracted from episodic memory). Resolved via research; pattern matches Skynet's RIPPER-based learned-rule quarantine. Resolved in research-findings (2026-05-18), locked at v1.2.
 
 **TBD-2b: Steering brain implementation.** Framework's reasoning as default + The Prompt with web search as Layer 6 escalation. Triple-check pattern (Pass 1 answer → Pass 2 critique with web search → Pass 3 reconciliation), dispatch lock prevents recursion. Locked at v0.3.
 
@@ -761,7 +819,7 @@ Every TBD from the design phase is now resolved. This section retains the resolu
 
 **TBD-8b: Decision Report schema specifics (producer side).** Top-level skeleton and per-component blocks locked in section 2.8. Schema versioning principle ("lock the spine, iterate the ribs") locked in v1.1. Locked at v1.1.
 
-**TBD-9: Triage gate design.** Three-stage cascade: rules (Stage 1, ~70% of requests, <1ms, free) → Haiku classifier (Stage 2, ~28%, 200-500ms, ~$0.0001 each) → The Prompt fallback (Stage 3, ~2% ambiguous). Six initial simple-handle paths defined (weather/time/currency/fact-lookup/web-search/definition). Locked at v1.2 (research-findings doc).
+**TBD-9: Triage gate design.** Three-stage cascade: rules (Stage 1, ~70% of requests, <1ms, free) → Haiku classifier (Stage 2, ~28%, 200-500ms, ~$0.0001 each) → The Prompt fallback (Stage 3, ~2% ambiguous). Six initial simple-handle paths defined (weather/time/currency/fact-lookup/web-search/definition). Resolved in research-findings (2026-05-18), locked at v1.2.
 
 **TBD-11: Context steward design.** Token estimation method: running counter of all observed I/O, conservative by construction (we undercount). Autocompact coordination: steward at ~60% of our counted tokens, before CC's autocompact at ~80% of its own count. Monitoring mechanism: hook-based subscription to CC's per-turn tool-result events; polling fallback. Intervention threshold for compact locked at 60%; other thresholds are evaluator-tunable v1 constants. Locked at v1.2.
 
@@ -779,15 +837,30 @@ Every TBD from the design phase is now resolved. This section retains the resolu
 - **TBD-7** — Run model: closed; architecture is run-model-agnostic. Continuous daemon, scheduled bursts, or interactive sessions all work. Closed v0.7.
 - **TBD-10** — Completion gate: collapsed into TBD-1b. The seeder's skeptical lens IS the completion gate; no separate mechanism. Closed v0.5.
 
+### Resolved during the v1.3 pre-implementation audit
+
+A pre-build audit (2026-06-08) re-read the locked architecture against Claude Code's real extension surface and found eight holes. All are now resolved; the most consequential changed a core mechanism.
+
+1. **Proactive dispatch had no real mechanism (severity: high).** v1.0–v1.2 had CC emit `[steering-director:]` mid-turn for a hook to catch — but no CC hook fires on arbitrary mid-turn text. **Resolved:** proactive dispatch is now the synchronous `consult_director` MCP tool (sections 2.2, 2.4, 2.9).
+2. **Reactive resume was described two incompatible ways.** "Synthesize a follow-up `UserPromptSubmit`" vs the native Stop-hook block-and-continue. **Resolved:** standardized on `Stop` returning block-with-reason; CC continues the same session (sections 2.4, 2.9).
+3. **Steward monitoring + actuation were unverified.** "Continuous mid-thought monitoring" and an external mid-turn `/compact` don't exist in CC. **Resolved:** steward is `PostToolUse`-driven (per-tool-call), `suggest_compact` injects guidance + a `PreCompact` safety net, `suggest_interrupt` resolves at the next tool boundary (sections 2.7, 2.9).
+4. **Evaluation-criteria source was unspecified.** Cycle 0 had no declared criteria. **Resolved:** cycle 0 criteria come from CC's wrapper-prompted done-when declaration; cycle N>0 from seeder preparation (sections 2.1, 2.5).
+5. **Run↔session mapping was circular.** **Resolved:** v1 maps exactly one Run to one CC session; cycles are consecutive turns within it (section 0).
+6. **The Prompt was an unpinned external dependency.** **Resolved:** vendored at a pinned commit, invoked as a system-prompt prefix (section 2.9).
+7. **Web search assumed unrestricted internet.** **Resolved:** pluggable search backend that routes through a proxy in restricted environments (section 2.9).
+8. **Memory concurrency model was undefined.** **Resolved:** single-writer (evaluator) inside the orchestrator; hooks never touch the DB directly; no cross-process SQLite contention (section 2.9).
+
+Two new failure modes were added for the re-grounded mechanism: **FM-18 (dispatch escape)** and **FM-19 (hook handler failure)**. The architecture is now at 19 failure modes.
+
 ### Summary
 
-**Twelve TBDs raised across the design phase. All resolved. Zero architecture work remaining.**
+**Twelve design-phase TBDs plus eight v1.3 pre-implementation audit findings. All resolved. Zero architecture work remaining — the system is implementation-ready.**
 
 The buildable architecture is sections 1-7 (concept, components, data flow, design insight, design principles, failure modes, framing). The implementation path is section 10. The audit substrate is section 2.8. Everything else is context for understanding why decisions landed where they did.
 
 ## 9. Component summary
 
-For quick reference, the system at v0.9 consists of:
+For quick reference, the system at v1.3 consists of:
 
 **Auxiliary (outside the loop):**
 - **Triage gate** — routes incoming requests; loop / simple-handle / reject
@@ -804,7 +877,7 @@ For quick reference, the system at v0.9 consists of:
 - **Memory** — four stores (episodic, semantic, strategy, failure), write-gated to the evaluator
 - **Decision Reports** (new in v1.1) — audit substrate, every component emits structured reasoning, evaluator-mediated writes, two-tier reporting for continuous monitors
 
-Five components we build (seeder, brain dispatch, context steward, evaluator, plus triage gate as auxiliary), plus the cycle wrapper that orchestrates them. The executor is the framework. The world is what the framework's tools touch. Memory is configured, not built.
+Five components we build (seeder, brain dispatch, context steward, evaluator, plus triage gate as auxiliary), plus the **orchestrator** (formerly "cycle wrapper") that hosts them all, owns persistent state, and attaches to Claude Code through hooks and the `consult_director` MCP tool (section 2.9). The executor is the framework. The world is what the framework's tools touch. Memory is configured, not built. The integration surface (hooks + one MCP tool) is the load-bearing new code that makes any of it actually run on CC.
 
 ## 10. Implementation strategy
 
@@ -812,7 +885,7 @@ This section is the entry point for the build phase. The architecture is locked;
 
 ### 10.1 Core principle: acceptance tests are upstream of code
 
-The Synthetic User system is a control system with tightly coupled components. Almost every documented failure mode (FM-2, 3, 7, 8, 13, 14, 15, 16) is an interaction failure, not a component-internal failure. Unit-testing components in isolation would catch approximately none of these.
+The Synthetic User system is a control system with tightly coupled components. Almost every documented failure mode (FM-2, 3, 7, 8, 13, 14, 15, 16, 18, 19) is an interaction failure, not a component-internal failure. Unit-testing components in isolation would catch approximately none of these.
 
 The implementation therefore follows **acceptance-test-driven development** at the system level. Tests are written before code. Tests define what "done" means. Components grow under test pressure rather than being built bottom-up and integrated later. This operationalizes Principle 6 (build quality into the process).
 
@@ -837,17 +910,17 @@ Three layers, listed by priority and where coverage starts:
 
 ### 10.3 Baseline acceptance scenarios (locked at v1.2)
 
-Twelve scenarios. Listed in approximate order of complexity. Build order should pull scenarios in roughly this order, though later scenarios may pull capability for earlier ones forward.
+Fourteen scenarios. Listed in approximate order of complexity. Build order should pull scenarios in roughly this order, though later scenarios may pull capability for earlier ones forward.
 
 **Scenario 1: Simple successful Run.** Cold-start request enters via triage. Triage routes to loop. Seeder cold-start passes the goal to CC. CC executes one turn, produces a deliverable. Evaluator scores high. Seeder reflects, all lenses converge on "done". Seeder stops with `complete`. Run terminates cleanly. Verifies: walking skeleton, data flow end-to-end, evaluator-mediated Decision Report writes.
 
 **Scenario 2: Refinement Run.** Cold-start request requires multi-step work (e.g., "build CSV deduplicator"). Cycle 0 builds. Seeder reflects, production+skeptical lenses surface untested edge cases. Cycle 1 refines (adversarial test cases). Seeder reflects, skeptical lens dominates, stops with `refinement_complete`. Run terminates cleanly. Verifies: multi-cycle Runs, seeder multi-lens reflection, cycle preparation between cycles.
 
-**Scenario 3: Halt-and-resume via reactive Stop-hook path.** CC halts mid-turn with disguised-as-completion language ("I need to ask..."). Stop-hook router Stage 1 catches it via regex. Routes to brain. Brain resolves with The Prompt + web search. Cycle wrapper synthesizes follow-up `UserPromptSubmit` carrying the answer. CC restarts. Original turn becomes two CC turns but one logical cycle. Verifies: reactive entry point, Stop-hook router classification, dispatch lock.
+**Scenario 3: Halt-and-resume via reactive Stop-hook path.** CC halts mid-turn with disguised-as-completion language ("I need to ask..."). Stop-hook router Stage 1 catches it via regex. Routes to brain. Brain resolves. The Stop handler returns block-with-reason; CC continues in the **same session** with the brain's answer injected (no new prompt synthesized). Verifies: reactive entry point (Stop-hook block-and-continue), Stop-hook router classification, dispatch lock.
 
-**Scenario 4: Halt-and-resume via proactive SessionStart instruction.** CC honors the SessionStart pre-prompt instruction. When CC would have asked a question, it emits `[steering-director:]` instead. Brain receives the question mid-turn, returns verdict, CC continues without halting. Run completes in one CC turn rather than two. Verifies: proactive entry point, SessionStart hook injection, in-turn dispatch.
+**Scenario 4: Proactive dispatch via the `consult_director` MCP tool.** CC honors the SessionStart instruction and calls `consult_director` instead of asking the user. The call blocks, the brain runs, the verdict returns as the tool result, CC continues without halting. Run completes in one turn. Verifies: proactive entry point (synchronous MCP-tool dispatch), SessionStart instruction injection, in-turn resolution with no halt.
 
-**Scenario 5: Steward fires compact intervention mid-cycle.** Long-running cycle pushes counted tokens past 60% of context. Steward emits `suggest_compact(preserve_guidance)`. CC compacts with the steward's preservation hints. Cycle continues healthy. Verifies: continuous monitoring, token estimation accuracy, steward intervention path, autocompact-coordination threshold gap.
+**Scenario 5: Steward fires compact intervention mid-cycle.** Long-running cycle pushes counted tokens past 60% of context. The `PostToolUse` handler detects the crossing and returns preservation guidance as injected context; CC summarizes its working state in-turn (the `PreCompact` hook supplies the same guidance if CC's own autocompact fires first). Cycle continues healthy. Verifies: per-tool-call monitoring, token estimation accuracy, steward intervention path, autocompact-coordination threshold gap.
 
 **Scenario 6: Triage rejection.** Malformed request enters (vague, missing context, contradictory constraints). Triage Stage 1 rules don't match, Stage 2 Haiku classifies as reject-with-clarification. Triage returns structured clarification request to goal source. No cycle ever starts. Verifies: triage rejection path, Stage 2 escalation, structured rejection format.
 
@@ -863,11 +936,15 @@ Twelve scenarios. Listed in approximate order of complexity. Build order should 
 
 **Scenario 12: Graceful degradation under component failure.** Inject a fault into one component (e.g., evaluator's Layer 2 Opus call returns malformed output, or steward's token counter desyncs from reality). Verify: evaluator audits the fault, system continues completing the current Run without that component's full participation, fault is logged for next-Run review, and the system re-enables the component cleanly for the next Run if the fault was transient. Verifies: graceful degradation, evaluator's audit-the-audit-substrate behavior (FM-17 mitigation), no single-component failure cascades to system failure.
 
+**Scenario 13: Dispatch escape is caught post-hoc (FM-18).** Force a Run where CC neither calls `consult_director` nor emits detectable halt-language, but makes a consequential assumption (e.g., silently picks a data format the spec left open). The turn classifies as completion. Verify: the evaluator's audit flags the unconsulted consequential decision, records it to failure memory, and (for the irreversible subset) the `PreToolUse` action-pattern path would still have fired independently. Verifies: FM-18 mitigation, evaluator post-hoc dispatch-escape detection, action-pattern independence.
+
+**Scenario 14: Hook handler failure fails safe (FM-19).** Inject a fault into each hook handler in turn (crash / timeout / orchestrator IPC down). Verify the safe-direction default for each: `PreToolUse` denies the registered action patterns but allows ordinary tools; `Stop` lets CC stop and routes to the evaluator; `PostToolUse` skips one steward update without aborting the cycle; `consult_director` returns the explicit "director unavailable" result. Verify every failure is logged as a finding. Verifies: FM-19 mitigation, fail-safe handler behavior, orchestrator health detection.
+
 ### 10.4 Build order
 
-Scenarios 1-2 establish the walking skeleton and basic Run lifecycle. These are the gates: nothing else gets built until scenarios 1 and 2 pass cleanly. After that, prioritize scenarios that exercise infrastructure (3, 4, 9 — hooks, dispatch, reports) before scenarios that exercise depth (5, 7, 8, 11 — steward, triple-check, evaluator, long-Run). Scenario 12 is last because graceful-degradation testing requires all other components to be mature enough to fault meaningfully.
+Scenarios 1-2 establish the walking skeleton and basic Run lifecycle. These are the gates: nothing else gets built until scenarios 1 and 2 pass cleanly. After that, prioritize scenarios that exercise infrastructure (3, 4, 9 — hooks, dispatch, reports) before scenarios that exercise depth (5, 7, 8, 11 — steward, triple-check, evaluator, long-Run). Scenarios 13–14 (integration-surface robustness) precede the final pair; scenario 12 remains last because graceful-degradation testing requires all other components to be mature enough to fault meaningfully.
 
-**Recommended order:** 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 11 → 12.
+**Recommended order:** 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12. (Scenarios 13–14 test the v1.3 integration surface's robustness — dispatch escape and hook-failure fail-safes — and slot in before the long-run and graceful-degradation tests.)
 
 Each scenario should fail meaningfully before code is written to pass it. "Meaningfully" means: the test exists, the system runs against the test, the test reports a specific failure that identifies what's missing. Tests that fail because of missing-import errors or syntax errors don't count — those indicate the scaffolding isn't ready yet, not that the test is providing pressure.
 
@@ -968,4 +1045,26 @@ The v0.9 update was driven by external course material (Anthropic Claude Code 10
 
 **TBD-11 partially resolved (section 8).** Token estimation method and autocompact coordination locked. Monitoring mechanism and non-compact intervention thresholds remain v1 build work.
 
-**No new failure modes.** The two FM additions considered (Stop-hook misclassification, threshold-gap-too-narrow) folded into FM-10 update and section 2.4/2.7 prose. The architecture stays at 16 failure modes.
+**No new failure modes.** The two FM additions considered (Stop-hook misclassification, threshold-gap-too-narrow) folded into FM-10 update and section 2.4/2.7 prose. The architecture stands at 17 failure modes (FM-1 through FM-17).
+
+### v1.2 → v1.3 (IMPLEMENTATION-READY — pre-build audit fixes)
+
+A pre-implementation audit (2026-06-08) re-read the locked v1.2 architecture against Claude Code's real extension surface, verified repo/sandbox/GitHub sync (all clean), and found eight holes. v1.3 resolves all eight. The status moves from "LOCKED (design complete)" to "IMPLEMENTATION-READY."
+
+**The consequential one: proactive dispatch re-grounded on an MCP tool (sections 2.2, 2.4, 2.9).** v1.0–v1.2 had CC emit a `[steering-director:]` magic string mid-turn for a hook to catch and answer. No CC hook fires on arbitrary mid-turn text, so that path was not buildable. v1.3 replaces it with a synchronous `consult_director` MCP tool: CC calls it instead of asking the user, blocks for the result, and continues in-turn. The reactive `Stop`-hook path is now standardized on native block-and-continue (not the previously-described "synthesize a follow-up `UserPromptSubmit`").
+
+**New section 2.9 (Integration surface).** Specifies the orchestrator process, the exact hook→mechanism mapping (`consult_director` MCP tool, `Stop`, `PreToolUse`, `PostToolUse`, `PreCompact`, `SessionStart`), cross-invocation state, the single-writer concurrency model, and the two pinned external dependencies (vendored The Prompt; pluggable search backend for restricted environments).
+
+**Context steward mechanism corrected (section 2.7).** From "continuous mid-thought monitoring" to honest per-tool-call (`PostToolUse`) cadence; the four interventions mapped to real CC mechanisms; `suggest_interrupt` acknowledged as best-effort at the next tool boundary.
+
+**Evaluation-criteria source pinned (sections 2.1, 2.5).** Cycle 0 criteria from CC's wrapper-prompted done-when declaration; cycle N>0 from seeder preparation. Evaluator sub-function count corrected (six → seven).
+
+**Run↔session mapping pinned (section 0):** one Run = one CC session for v1.
+
+**Two new failure modes:** FM-18 (dispatch escape) and FM-19 (hook handler failure), each with fail-safe mitigations. Architecture now at **19** failure modes. The v1.2 changelog's "stays at 16" was itself a miscount (it was 17 after FM-17); corrected here.
+
+**Two new acceptance scenarios:** 13 (dispatch escape caught post-hoc) and 14 (hook handler fails safe). Baseline is now 14 scenarios; build order updated to 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
+
+**Cosmetic fixes:** stale "this is v0.9 / six TBDs open" lines in sections 7 and 9 corrected to v1.3; a garbled sentence in section 2.4 repaired; TBD provenance lines made accurate.
+
+**What comes next is still code** — now genuinely so. The mechanism questions that would have blocked the walking skeleton (proactive dispatch, criteria source, Run↔session, The Prompt) are answered. Scenario 1 can be built.
