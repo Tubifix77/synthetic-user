@@ -2,7 +2,7 @@
 
 > A closed-loop control system that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure replacing the human roles that ordinarily sit around such a loop.
 
-**Status: IMPLEMENTATION-READY at v1.3.** (v1.2 locked the design; a v1.3 pre-build audit re-grounded the Claude Code dispatch on an MCP tool and closed eight holes — see architecture2.md section 2.9 and the changelog.)
+**Status: IMPLEMENTATION-READY at v1.4.** (v1.2 locked the design; a v1.3 pre-build audit re-grounded the Claude Code dispatch on an MCP tool and closed eight holes — see architecture2.md section 2.9 and the changelog.)
 
 ## What it is
 
@@ -31,7 +31,7 @@ The agentic loop itself — planning, tool use, code generation, verification �
 
 ## Architecture (v1.2 LOCKED)
 
-The buildable architecture lives in [architecture2.md](architecture2.md). Twelve revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
+The buildable architecture lives in [architecture2.md](architecture2.md). Fourteen revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved) → v1.3 (pre-build audit: dispatch re-grounded on the consult_director MCP tool, integration surface specified, 8 holes closed) → v1.4 (current-science audit: autonomy edge, seeder hardening, Decision Reports as coordination backbone, steward degradation proxy).
 
 **Key concepts:**
 
@@ -40,7 +40,7 @@ The buildable architecture lives in [architecture2.md](architecture2.md). Twelve
 - **Hybrid synth-user dispatch** — proactive entry via `SessionStart` hook + reactive entry via `Stop` hook; uncorrelated failure modes covered by both paths
 - **Decision Reports** — every component documents its reasoning in a schema-validated stream, routed through the evaluator for memory persistence
 
-**Nineteen named failure modes** cover the predictable ways the system fails — most are interaction failures between components rather than component-internal bugs.
+**Twenty named failure modes** cover the predictable ways the system fails — most are interaction failures between components rather than component-internal bugs.
 
 ## The hypothesis being tested
 
@@ -59,12 +59,12 @@ If no: the failure modes themselves are the contribution — they map the bounda
 
 Build is **acceptance-test-driven**:
 
-1. Fourteen baseline acceptance scenarios (section 10.3)
+1. Fifteen baseline acceptance scenarios (section 10.3)
 2. Walking skeleton passes scenario 1 only; each subsequent scenario drives component growth
 3. Three test layers: acceptance scenarios (primary), contract tests on interfaces (defense in depth), targeted unit tests for deterministic gnarly logic
 4. **Mocking LLM-calling components is explicitly rejected** — the interaction with real model behavior IS what's being tested
 
-Recommended build order: scenarios 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
+Recommended build order: scenarios 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
 
 ## Lineage
 

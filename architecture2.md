@@ -1,10 +1,10 @@
-# Synthetic User — Architecture v1.3 (IMPLEMENTATION-READY)
+# Synthetic User — Architecture v1.4 (IMPLEMENTATION-READY)
 
 **Status: IMPLEMENTATION-READY — design complete, the Claude Code integration mechanism is now specified (section 2.9), and all eight pre-implementation audit findings are resolved (section 8). Build begins from this document.**
 
 Twelve revisions across the design phase: v0.1 (initial five-component decomposition) → v0.9 (context steward + cycle preparation) → v1.0 (CC hook binding + hybrid synth-user dispatch) → v1.1 (Decision Reports as audit substrate) → v1.2 (acceptance-test-driven implementation strategy + all TBDs resolved).
 
-All design TBDs are resolved, and a v1.3 pre-implementation audit closed eight further holes (most importantly: the v1.0–v1.2 dispatch design assumed a Claude Code hook that does not exist; v1.3 re-grounds proactive dispatch on an MCP tool). Section 2.9 specifies exactly how the wrapper attaches to Claude Code. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the full decision history.
+All design TBDs are resolved, and a v1.3 pre-implementation audit closed eight further holes (most importantly: the v1.0–v1.2 dispatch design assumed a Claude Code hook that does not exist; v1.3 re-grounds proactive dispatch on an MCP tool). Section 2.9 specifies exactly how the wrapper attaches to Claude Code. Section 10 (Implementation Strategy) is the entry point for the build phase. Section 8 retains the full decision history. v1.4 adds four refinements from a current-science audit (a fifth audit item is consciously deferred) — see section 8.
 
 **What this is.** A closed-loop agent architecture that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure that replaces the human roles ordinarily sitting around such a loop. The framework does the cognitive work inside cycles; this project builds the substitutes for the human who would otherwise drive the framework from outside.
 
@@ -143,6 +143,13 @@ This inventory is the honest scope of new work for v1. Six things to build. Thre
 **At cycle 0 (cold start):** Pure pass-through with minimal preparation. The triage gate has already validated the request. The seeder hands the goal to the framework verbatim, optionally with default cycle preparation if the deployment has standing rules (e.g., default MCP set). No reflection at cycle 0 — there is no prior cycle to reflect on.
 
 **Evaluation-criteria source (resolved v1.3).** The evaluator scores against *declared* criteria, so something must declare them. At **cycle 0**, the cycle wrapper prepends a one-line criteria-declaration step to the goal: CC is asked to state explicit done-when conditions before beginning work ("before starting, list the concrete conditions that would make this task complete"). The orchestrator captures that declaration and hands it to the evaluator as cycle 0's criteria. At **cycle N>0**, the seeder's cycle preparation carries the criteria for that cycle — the lenses that identified the next direction also define what "done" means for it. This closes the gap where cycle 0 would otherwise have no criteria beyond "a deliverable exists."
+
+**Seeder isolation, grounding, and validation (v1.4).** The current-science audit identified the seeder as the architecture's highest-risk component: direction-setting is largely *intrinsic* reflection, which the self-correction literature (Huang et al. 2024; Kamoi et al. TACL) shows is unreliable without external feedback, and it is the surface least anchored to reality. Two independent literatures converge here — the second being that LLM-simulated human judgment diverges from real humans in biased ways ("Lost in Simulation", 2026). Three v1.4 adjustments harden the seeder without replacing it:
+
+- **Isolation behind a measurable interface.** The seeder is a clean module with a defined output (next-direction + per-cycle criteria) and a defined quality signal (the validation gate below). Its internals are hot-swappable: the v1 LLM-reflection implementation can later be replaced wholesale — by a dedicated "what to build next" subsystem, or by a human-curated menu — without touching any other component. This converts the architecture's biggest risk from load-bearing to replaceable.
+- **Selection over generation (grounding).** Rather than generating direction from nothing, the seeder selects and refines from grounded inputs: prior cycles' evaluator scores (what actually worked), the failure-memory store (what didn't), and — where available — a backlog of candidate directions. Selection-and-refinement from grounded candidates is the verifiable mode the self-correction literature endorses; free generation is the intrinsic mode it warns against. Selection has its own failure (collapsing to always-pick-the-same, or a stale backlog); that falls under FM-1/FM-13 and is caught by the validation gate and the evaluator.
+- **Coordination via Decision Reports.** Before producing cycle preparation, the seeder reads the current cycle's Decision Reports — what the brain decided in-flight, what the steward did — so its preparation does not contradict in-flight decisions (the control-surface-seam risk; see section 2.8).
+- **Validation gate.** The seeder's direction-and-stop calls are measured against human judgment on a sample (acceptance scenario 15): how often does its "what's next / is this done" match what a human operator would have chosen? That measurement tells you whether the grounded seeder is good enough or genuinely needs to become its own project. Replace on a measurement, not a hunch.
 
 **At cycle boundaries (after cycle N completes, before cycle N+1):** Multi-lens reflection + cycle preparation.
 
@@ -412,7 +419,11 @@ The steward is still its own component (it meets Principle 1's bar: distinct cad
 
 Rule: **steward intervenes before CC's autocompact would fire, never after.** Concretely, the steward's `suggest_compact` threshold sits at ~60% of *our counted tokens*. Because our estimate undercounts (we don't see CC's hidden system prompt, internal tool schemas, or framework scratchpad overhead), 60% of our count typically corresponds to 70–75% of CC's actual count — still comfortably below CC's autocompact trigger. The steward thus acts first when it's going to act at all, applying guided compaction with preservation hints, rather than letting CC's silent autocompact strip information without judgment.
 
+**Degradation trigger, not just a fullness trigger (v1.4).** The 60% token threshold measures context *fullness*, but the context-rot literature (Chroma, 18 models) shows degradation is non-linear and content-dependent — context can rot well below any fullness line. The steward therefore fires on *either* the token floor OR a degradation signal, whichever trips first. Degradation proxies, in rising cost order: repetition / self-contradiction in CC's recent output (cheap, catches the classic rot signature); a periodic lightweight "still on the original goal?" coherence probe (medium); and distractor-density (how much recent context is stale tool output versus goal-relevant). The token floor catches the slow fill; the degradation proxy catches the "rotted at 40%" case. False-positive degradation signals causing needless compaction fall under FM-15 (steward over-intervention); the evaluator tunes which proxy actually predicted bad cycles.
+
 The 60% / 80% relationship is a v1 build-time constant pair (tunable per deployment). If CC's autocompact fires anyway (steward missed it, threshold drifted, run exceeded estimates), the steward's other interventions — `suggest_delegate`, `suggest_interrupt` — remain orthogonal to autocompact and continue functioning. Only `suggest_compact` is at risk of double-firing with CC, and the threshold gap is the mitigation.
+
+**Coordination check before compaction (v1.4).** Before issuing `suggest_compact`, the steward reads the current cycle's Decision Reports; if a recent brain verdict relied on context the compaction would drop, the steward preserves it explicitly or defers. See section 2.8 (Decision Reports as coordination backbone).
 
 **Implementation note (mechanism, v1.3).** The four interventions map to real CC mechanisms (full detail in section 2.9): `suggest_compact` = the `PostToolUse` handler returns preservation guidance as injected `additionalContext` so CC self-summarizes in-turn, backed by a `PreCompact` hook that supplies the same guidance to CC's own autocompact; `suggest_delegate` = `additionalContext` suggesting CC spawn a subagent (Task tool) for upcoming bounded work; `suggest_interrupt` = best-effort, the handler sets an interrupt flag that the next `PreToolUse` hook reads and denies, ending the cycle at the next tool boundary (true mid-turn interruption is not possible); routine pings = a counter update plus a minimal Decision Report, no CC-visible action. The threshold/nuance split (rules for the 60% line, a small LLM for "is this exploration core or pollution") still applies, evaluated inside the handler.
 
@@ -429,6 +440,8 @@ The 60% / 80% relationship is a v1 build-time constant pair (tunable per deploym
 **Why this exists.** Event logs ("brain returned proceed at T") tell you *what happened*. Decision Reports tell you *why and what else was on the table*. Production AI systems need both. Without structured decision reasoning, post-hoc analysis depends on replaying the system; with reports, an auditor can scan reasoning across runs without re-executing anything.
 
 **Operational model.** Each component generates its own reports as structured output. Reports do NOT write directly to memory — they go to a per-Run report buffer (in-memory queue keyed by `run_id`). The evaluator drains the buffer at cycle close, validates each report against its component's schema, and persists to memory. This preserves the v0.9 rule that only the evaluator writes (section 2.6), while enabling every component to participate in the audit substrate.
+
+**Decision Reports as coordination backbone (v1.4).** Beyond post-hoc audit, Decision Reports are the mechanism that prevents conflicting decisions at the seams between control surfaces (Cognition's "actions carry implicit decisions" risk). Each control surface reads the current cycle's reports before acting: the seeder checks the brain's in-flight verdicts before cycle preparation; the steward checks whether a planned compaction would drop context a recent brain verdict relied on. This makes the implicit decisions explicit and visible to all surfaces, turning the audit substrate into the coordination layer — the same artifact earning its token cost twice. (Reading stale or wrong reports is a contamination risk under FM-4/FM-17; reports are current-cycle and schema-validated to bound it.)
 
 **The one exception: evaluator self-reports.** The evaluator's own decisions (scoring, attribution, threshold tuning) cannot route through itself — a notary can't notarize their own signature. Evaluator reports write directly to memory, but are flagged `self_reported=true` so external audits know to apply extra scrutiny. This is the only case where the evaluator-mediated-writes rule is bypassed.
 
@@ -515,7 +528,7 @@ This section is new in v1.3. It exists because the v1.0–v1.2 dispatch design d
 
 **Action-pattern brain entry — the `PreToolUse` hook.** Fires before each tool call. The handler matches the pending call against the four registered action patterns (`git_push_to_public_repo`, `claim_done`, `add_dependency`, `modify_schema`). On a match it invokes the brain and maps the verdict to PreToolUse semantics: `proceed` → allow, `redirect` → allow with injected `additionalContext` pointing at the context to re-read, `halt` → deny with reason. On no match it allows immediately.
 
-**Context steward — the `PostToolUse` + `PreCompact` hooks.** The `PostToolUse` handler fires after each tool call, updates the orchestrator-owned token counter (tool-result size + running total), and evaluates the 60% threshold. Interventions: `suggest_compact` returns preservation guidance as injected `additionalContext` (CC self-summarizes in-turn); a `PreCompact` hook supplies the same guidance to CC's own autocompact as a safety net; `suggest_delegate` injects a suggestion to spawn a subagent; `suggest_interrupt` sets an interrupt flag that the next `PreToolUse` hook reads and denies, ending the cycle at the next tool boundary. Granularity is per-tool-call, not mid-thought.
+**Context steward — the `PostToolUse` + `PreCompact` hooks.** The `PostToolUse` handler fires after each tool call, updates the orchestrator-owned token counter (tool-result size + running total), and evaluates the 60% threshold. Interventions: `suggest_compact` returns preservation guidance as injected `additionalContext` (CC self-summarizes in-turn); a `PreCompact` hook supplies the same guidance to CC's own autocompact as a safety net; `suggest_delegate` injects a suggestion to spawn a subagent; `suggest_interrupt` sets an interrupt flag that the next `PreToolUse` hook reads and denies, ending the cycle at the next tool boundary. Granularity is per-tool-call, not mid-thought. The handler also runs the v1.4 degradation proxy (repetition/contradiction, a periodic coherence probe, distractor-density) and fires on either the token floor or a degradation signal, whichever trips first.
 
 **`SessionStart` hook.** Fires when the orchestrator opens a session for a Run. Injects the `consult_director` instruction and any standing deployment rules.
 
@@ -529,6 +542,23 @@ This section is new in v1.3. It exists because the v1.0–v1.2 dispatch design d
 - **Web search backend.** Components that "use web search" (brain Layer 6 Pass 2, seeder comparative lens, triage Stage 3) call a pluggable interface (`core/search/backend.py`), never a hardcoded provider. v1 default is the deployer's available search. In internet-restricted environments the backend routes through a local proxy (e.g., a proxy MCP) — the expected configuration on the reference build machine.
 
 **What is NOT assumed.** No ability to read CC's live token state mid-turn (only per-tool-call estimates). No ability to force a `/compact` inside a running turn (only injected guidance + the PreCompact safety net). No hook that fires on arbitrary model text mid-turn (the MCP tool replaces that need). No second concurrent writer to memory. If a future CC version adds richer surfaces, the wrapper can use them, but v1 depends only on what is listed here.
+
+### 2.10 Confidence-gated autonomy (the escalation edge)
+
+New in v1.4. Section 7 states the system runs without human approval inside the loop. The current-science audit (section 8) flagged this as the architecture's most contrarian stance: the 2026 production-reliability consensus treats human oversight as near-mandatory. The resolution is not to abandon the thesis (synthetic oversight) but to make the synthetic layer *earn* autonomy and to keep a human at the loop's *edge* for the statistically rare high-stakes case — not in the common path.
+
+**The dial.** Every cycle carries two signals the architecture already produces: the evaluator's confidence in its own assessment, and the steering brain's reversibility assessment of the cycle's consequential actions. The autonomy policy is a function of both:
+- High confidence AND high reversibility → fully autonomous (the common case).
+- Low confidence AND low reversibility *simultaneously* → escalate to a human queue before the irreversible step; the Run pauses for that decision.
+- Mixed (one low, one high) → autonomous, but flagged for the evaluator's attention with a Decision Report `audit_flag`.
+
+This answers the oversight critique (a human is accountable for the cases that statistically matter) without surrendering the thesis (humans are absent from the overwhelming majority of cycles). It reuses existing signals — brain reversibility, evaluator confidence — so it is policy wiring, not new cognition.
+
+**The dial widens with evidence.** Escalation thresholds start conservative (escalate readily) and relax as the evaluator accumulates outcome-grounded evidence that the synthetic layer's autonomous calls held up against reality. Earning autonomy from a measured track record is also how the project would *demonstrate* the synthetic-oversight thesis rather than merely asserting it.
+
+**Relationship to the action-pattern triggers.** The four `PreToolUse` action patterns (section 2.9) are the hard floor — they fire regardless of the dial. The dial governs the softer, judgment-based escalations; the action patterns govern the irreversible-by-definition set. Both can route to the human queue.
+
+**Deployment note.** A deployment that wants the pure thesis (no human anywhere) sets the dial fully open and the human queue becomes a log. A deployment that wants conservative operation sets it narrow. The default is conservative; the autonomy stance is therefore a deployment choice, not a hardcoded property. This failure surface is FM-20.
 
 ## 3. Data flow
 
@@ -731,6 +761,7 @@ The most important section. These are the predictable ways the system fails.
 **Mitigation.**
 - Context steward runs continuously, intervenes before the framework auto-compacts
 - Steward's `suggest_compact` includes preservation guidance, unlike silent auto-compact
+- (v1.4) Steward fires on a content-based degradation proxy as well as the token threshold, catching rot that occurs below any fullness line (context-rot research shows degradation is non-linear and content-dependent)
 - Evaluator tracks context state at cycle close; cycles that completed near the context limit get flagged
 
 ### Failure mode 15 (new in v0.9): Steward over-intervention
@@ -791,6 +822,18 @@ The most important section. These are the predictable ways the system fails.
 - `consult_director` unreachable → the tool returns an explicit "director unavailable, use your best judgement and note the assumption" result, which the evaluator later audits.
 - Every handler failure is logged as a finding; repeated failures raise a yellow flag. The orchestrator exposes a health endpoint the handlers ping, so a dead orchestrator is detected rather than silently degrading.
 
+### Failure mode 20 (new in v1.4): Autonomy-dial miscalibration
+
+**Symptom.** Either the dial widens too fast — granting full autonomy on low-reversibility actions before the synthetic layer has earned it — or it over-escalates, flooding the human queue with low-value confirmations until the human rubber-stamps everything (worse than no gate, because it looks like oversight while providing none).
+
+**Cause.** The widening schedule leans on the evaluator's own confidence, which the deferred judge-self-validation item (section 8) means we cannot yet fully trust. A miscalibrated evaluator miscalibrates the dial.
+
+**Mitigation.**
+- The dial only ever *widens* on a track record of decisions that reality later confirmed (outcome-grounded), never on the evaluator's unverified confidence alone.
+- Escalation volume is itself a monitored metric: a queue that never fires and a queue that always fires are both findings.
+- The action-pattern `PreToolUse` floor is independent of the dial, so the irreversible set stays gated even with the dial wide open.
+- Coupled to the deferred judge-self-validation item: the dial should not be widened aggressively until that calibration question has an answer.
+
 ## 7. What this is, restated
 
 It bears repeating because the framing matters:
@@ -798,7 +841,7 @@ It bears repeating because the framing matters:
 - **Not a path to AGI.** It is a control system around an existing agentic framework.
 - **Not safety research.** The components optimize reliability, not alignment.
 - **Not novel in any single component.** Actor-critic, self-play, reflection, tool use, persistent memory, multi-perspective evaluation, context management — all of these exist. The contribution, if any, is in the specific composition: the decomposition of "the human in the loop" into roles, the substitution of named components for the roles that need building, the inheritance of the rest from the framework.
-- **Not human-in-the-loop.** A standard agentic-workflow framing positions the human as a governor reviewing the agent's plan before execution. The synthetic-user architecture deliberately rejects this. The triage gate is the only place a human can be involved, and it sits *before* the loop runs, not as a checkpoint inside it. Once the gate accepts the request, the system runs to completion without human approval at any intermediate step. Safeguards are structural (multi-lens reflection, context monitoring, external grounding, post-hoc evaluator learning) rather than procedural.
+- **Not human-in-the-loop.** A standard agentic-workflow framing positions the human as a governor reviewing the agent's plan before execution. The synthetic-user architecture deliberately rejects this. The triage gate is the only place a human can be involved, and it sits *before* the loop runs, not as a checkpoint inside it. Once the gate accepts the request, the system runs without human approval in the common path. v1.4 adds one qualification: a confidence-gated escalation edge (section 2.10) routes the statistically rare low-confidence + low-reversibility cases to a human queue. This is a human at the loop's *edge*, not a governor inside it — and it is configurable to fully open (no human anywhere) for deployments that want the pure thesis. Safeguards are structural (multi-lens reflection, context monitoring, external grounding, post-hoc evaluator learning) rather than procedural.
 - **Not finished, but implementation-ready.** This is v1.3. All design TBDs are resolved (section 8) and the Claude Code integration mechanism is specified (section 2.9). What remains is building it against the acceptance scenarios in section 10.
 
 ## 8. Design decision history (all resolved)
@@ -850,11 +893,23 @@ A pre-build audit (2026-06-08) re-read the locked architecture against Claude Co
 7. **Web search assumed unrestricted internet.** **Resolved:** pluggable search backend that routes through a proxy in restricted environments (section 2.9).
 8. **Memory concurrency model was undefined.** **Resolved:** single-writer (evaluator) inside the orchestrator; hooks never touch the DB directly; no cross-process SQLite contention (section 2.9).
 
-Two new failure modes were added for the re-grounded mechanism: **FM-18 (dispatch escape)** and **FM-19 (hook handler failure)**. The architecture is now at 19 failure modes.
+Two new failure modes were added for the re-grounded mechanism: **FM-18 (dispatch escape)** and **FM-19 (hook handler failure)**, bringing v1.3 to 19 failure modes.
+
+### Resolved during the v1.4 current-science audit
+
+A research pass (2026-06-09) compared the architecture against the current (2025–2026) literature on multi-agent systems, LLM-as-judge, self-correction, context engineering, and agent reliability. The design held up well on mechanism, and was slightly ahead on two fronts (the evaluator's outcome-grounding versus the LLM-as-judge bias crisis; the steward matching Anthropic's long-horizon playbook). It surfaced five points of friction — four adjusted in v1.4, the fifth consciously deferred.
+
+1. **No-human-in-the-loop is contrarian (adjusted).** Added a confidence-gated autonomy edge (section 2.10) — human at the loop's edge for rare high-stakes cases, configurable to fully open. New FM-20.
+2. **The seeder is the highest-risk component (adjusted).** Two literatures converge: intrinsic self-correction is unreliable (Huang et al.; Kamoi et al.), and LLM-simulated human judgment diverges from real humans ("Lost in Simulation", 2026). Hardened by isolation behind a hot-swappable interface, selection-over-generation grounding, and a human-agreement validation gate (section 2.1; acceptance scenario 15).
+3. **Conflicting decisions at control-surface seams (adjusted).** Cognition's "actions carry implicit decisions" risk. Decision Reports promoted from post-hoc audit to coordination backbone — every surface reads current-cycle reports before acting (sections 2.8, 2.1, 2.7).
+4. **Steward threshold measures fullness, not degradation (adjusted).** Context-rot research (Chroma) shows degradation is non-linear and content-dependent. Added a content-based degradation proxy as a second trigger alongside the token floor (sections 2.7, 2.9).
+5. **The evaluator's own judgments can't be fully validated (deferred — under discussion).** CMU's rating-indeterminacy result is a field-wide open problem with no clean fix. Consciously left as a "manage, not fix" item: scope Layer 2 attribution as a hint generator, anchor on outcomes where possible, add a thin human spot-check for calibration. Approach under active discussion; not yet specified in the architecture.
+
+Two of the four adjustments add no new component — they make existing components (Decision Reports; brain reversibility + evaluator confidence) do more. One new failure mode (FM-20) and one new acceptance scenario (15) were added. The architecture is now at **20 failure modes** and **15 baseline acceptance scenarios**.
 
 ### Summary
 
-**Twelve design-phase TBDs plus eight v1.3 pre-implementation audit findings. All resolved. Zero architecture work remaining — the system is implementation-ready.**
+**Twelve design-phase TBDs, eight v1.3 audit findings, and four v1.4 science-audit adjustments (a fifth deferred). All resolved. Zero architecture work remaining — the system is implementation-ready.**
 
 The buildable architecture is sections 1-7 (concept, components, data flow, design insight, design principles, failure modes, framing). The implementation path is section 10. The audit substrate is section 2.8. Everything else is context for understanding why decisions landed where they did.
 
@@ -910,7 +965,7 @@ Three layers, listed by priority and where coverage starts:
 
 ### 10.3 Baseline acceptance scenarios (locked at v1.2)
 
-Fourteen scenarios. Listed in approximate order of complexity. Build order should pull scenarios in roughly this order, though later scenarios may pull capability for earlier ones forward.
+Fifteen scenarios. Listed in approximate order of complexity. Build order should pull scenarios in roughly this order, though later scenarios may pull capability for earlier ones forward.
 
 **Scenario 1: Simple successful Run.** Cold-start request enters via triage. Triage routes to loop. Seeder cold-start passes the goal to CC. CC executes one turn, produces a deliverable. Evaluator scores high. Seeder reflects, all lenses converge on "done". Seeder stops with `complete`. Run terminates cleanly. Verifies: walking skeleton, data flow end-to-end, evaluator-mediated Decision Report writes.
 
@@ -940,11 +995,13 @@ Fourteen scenarios. Listed in approximate order of complexity. Build order shoul
 
 **Scenario 14: Hook handler failure fails safe (FM-19).** Inject a fault into each hook handler in turn (crash / timeout / orchestrator IPC down). Verify the safe-direction default for each: `PreToolUse` denies the registered action patterns but allows ordinary tools; `Stop` lets CC stop and routes to the evaluator; `PostToolUse` skips one steward update without aborting the cycle; `consult_director` returns the explicit "director unavailable" result. Verify every failure is logged as a finding. Verifies: FM-19 mitigation, fail-safe handler behavior, orchestrator health detection.
 
+**Scenario 15: Seeder direction matches human judgment (validation gate, v1.4).** On a sample of real deliverables, compare the seeder's cycle-boundary calls — "what's next" and "is this done" — against what a human operator would have chosen, and measure agreement rate. This is the validation gate for the seeder-isolation adjustment (section 2.1): a low agreement rate is the signal that the grounded seeder needs replacing (e.g., promotion to a dedicated "what to build next" subsystem) rather than tuning. Verifies: seeder grounding quality, the highest-risk component's fitness, the synthetic-oversight thesis at its weakest point.
+
 ### 10.4 Build order
 
 Scenarios 1-2 establish the walking skeleton and basic Run lifecycle. These are the gates: nothing else gets built until scenarios 1 and 2 pass cleanly. After that, prioritize scenarios that exercise infrastructure (3, 4, 9 — hooks, dispatch, reports) before scenarios that exercise depth (5, 7, 8, 11 — steward, triple-check, evaluator, long-Run). Scenarios 13–14 (integration-surface robustness) precede the final pair; scenario 12 remains last because graceful-degradation testing requires all other components to be mature enough to fault meaningfully.
 
-**Recommended order:** 1 → 2 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12. (Scenarios 13–14 test the v1.3 integration surface's robustness — dispatch escape and hook-failure fail-safes — and slot in before the long-run and graceful-degradation tests.)
+**Recommended order:** 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12. (Scenario 15, the seeder validation gate, slots in right after the loop basics since it is cheap and high-information; scenarios 13–14 test integration-surface robustness before the long-run and graceful-degradation tests.)
 
 Each scenario should fail meaningfully before code is written to pass it. "Meaningfully" means: the test exists, the system runs against the test, the test reports a specific failure that identifies what's missing. Tests that fail because of missing-import errors or syntax errors don't count — those indicate the scaffolding isn't ready yet, not that the test is providing pressure.
 
@@ -1068,3 +1125,21 @@ A pre-implementation audit (2026-06-08) re-read the locked v1.2 architecture aga
 **Cosmetic fixes:** stale "this is v0.9 / six TBDs open" lines in sections 7 and 9 corrected to v1.3; a garbled sentence in section 2.4 repaired; TBD provenance lines made accurate.
 
 **What comes next is still code** — now genuinely so. The mechanism questions that would have blocked the walking skeleton (proactive dispatch, criteria source, Run↔session, The Prompt) are answered. Scenario 1 can be built.
+
+### v1.3 → v1.4 (current-science audit adjustments)
+
+A research pass (2026-06-09) compared the architecture against the 2025–2026 literature on multi-agent systems, LLM-as-judge, self-correction, context engineering, and agent reliability. The design held up well on mechanism; the audit produced four adjustments and one deferred item (section 8).
+
+**Issue 1 — autonomy edge (section 2.10, FM-20).** The no-human-in-the-loop stance is contrarian versus the 2026 oversight consensus. Added a confidence-gated escalation edge: low-confidence + low-reversibility cases route to a human queue; the dial widens as the synthetic layer earns an outcome-grounded track record; configurable to fully open for the pure thesis. Reuses existing brain-reversibility and evaluator-confidence signals — policy wiring, not new cognition.
+
+**Issue 2 — seeder hardening (section 2.1, scenario 15).** The seeder is the highest-risk component (intrinsic self-correction is unreliable; simulated human judgment diverges from real humans). Hardened by: isolation behind a hot-swappable interface, selection-over-generation grounding (prior scores, failure memory, candidate backlog), and a human-agreement validation gate. The standalone "what to build next" project is the natural replacement path the interface enables.
+
+**Issue 3 — Decision Reports as coordination backbone (section 2.8).** Promoted from post-hoc audit to the mechanism that prevents conflicting decisions at control-surface seams: each surface reads current-cycle reports before acting. The audit substrate now earns its cost twice. No new component.
+
+**Issue 4 — steward degradation proxy (sections 2.7, 2.9).** The fixed token threshold measures fullness, not degradation; context rot is non-linear (Chroma). Added a content-based degradation proxy (repetition/contradiction, coherence probe, distractor-density) as a second trigger. Additive to the existing mechanism.
+
+**Issue 5 — judge self-validation (deferred).** Whether the evaluator's own attributions are correct is a field-wide open problem (CMU rating indeterminacy). Consciously left as "manage, not fix"; approach under discussion.
+
+**Counts:** 20 failure modes (FM-20 added), 15 baseline acceptance scenarios (scenario 15 added), build order now 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
+
+**Still implementation-ready.** All four adjustments are refinements to a buildable design, not new blockers. Scenario 1 remains the starting point.
