@@ -35,3 +35,7 @@ Thumbs.db
 *.key
 *.pem
 config.local.*
+
+# Claude Code per-machine / personal (do not commit)
+CLAUDE.local.md
+.claude/settings.local.json
