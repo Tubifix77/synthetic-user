@@ -146,6 +146,23 @@ def weighted_mean_score(
     return weighted_sum / total_weight
 
 
+def estimate_tokens(text: str) -> int:
+    """Estimate the number of tokens in *text* without an API call.
+
+    Uses the widely-observed rule of thumb that one token ≈ 4 bytes of UTF-8
+    for English prose, adjusted slightly upward for code/JSON which tends to
+    tokenise more densely.  Accurate to ±15% for typical LLM prompt content;
+    good enough for a compact-threshold guard (scenario 9) where a hard cutoff
+    is undesirable anyway.
+
+    Returns a non-negative integer.
+    """
+    if not text:
+        return 0
+    byte_len = len(text.encode("utf-8"))
+    return max(1, round(byte_len / 3.8))
+
+
 def truncate_text(text: str, max_chars: int, *, suffix: str = "…") -> str:
     """Truncate *text* to at most *max_chars* characters, breaking at a word boundary.
 

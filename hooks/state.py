@@ -59,6 +59,58 @@ def filter_hook_events(
     return result
 
 
+def get_counted_tokens() -> int:
+    """Return accumulated token estimate for this session."""
+    d = session_dir()
+    if d is None:
+        return 0
+    path = d / "token_counter.json"
+    if not path.exists():
+        return 0
+    try:
+        return int(json.loads(path.read_text()).get("counted_tokens", 0))
+    except Exception:
+        return 0
+
+
+def add_counted_tokens(delta: int) -> int:
+    """Add delta to the counter; return the new total."""
+    d = session_dir()
+    if d is None:
+        return 0
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "token_counter.json"
+    total = get_counted_tokens() + delta
+    path.write_text(json.dumps({"counted_tokens": total}))
+    return total
+
+
+def get_dispatch_lock() -> bool:
+    """True if consult_director already fired this turn (prevents Stop-hook double-fire)."""
+    d = session_dir()
+    if d is None:
+        return False
+    lock_path = d / "dispatch_lock.json"
+    if not lock_path.exists():
+        return False
+    try:
+        return bool(json.loads(lock_path.read_text())["locked"])
+    except Exception:
+        return False
+
+
+def set_dispatch_lock(locked: bool) -> None:
+    d = session_dir()
+    if d is None:
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "dispatch_lock.json").write_text(json.dumps({"locked": locked}))
+
+
+def clear_dispatch_lock() -> None:
+    set_dispatch_lock(False)
+
+
 def get_interrupt_flag() -> bool:
     d = session_dir()
     if d is None:

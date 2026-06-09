@@ -24,11 +24,10 @@ class Orchestrator:
 
     def run(self, request: Request) -> Run:
         buffer = ReportBuffer()
-        route = triage_mod.triage(request, buffer)
-        run = Run(request=request, route=route)
+        route, rejected_reason = triage_mod.triage(request, buffer)
+        run = Run(request=request, route=route, rejected_reason=rejected_reason)
 
         if route is not Route.LOOP:
-            run.rejected_reason = "triage did not route to loop"
             evaluator.ingest_reports(buffer, self.memory)
             run.reports = self.memory.all_reports()
             return run

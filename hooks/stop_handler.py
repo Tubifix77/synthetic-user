@@ -13,8 +13,10 @@ import sys
 
 sys.path.insert(0, "D:/AI/Synthetic")
 from hooks.router import is_halt, read_last_assistant_text
-from hooks.brain_stub import answer
-from hooks.state import log_hook_event
+from hooks.state import log_hook_event, get_dispatch_lock, clear_dispatch_lock
+
+sys.path.insert(0, "D:/AI/Synthetic")
+from synthetic_user.brain import dispatch as brain_dispatch
 
 
 def main():
@@ -28,6 +30,12 @@ def main():
         log_hook_event({"hook": "Stop", "session_id": session_id, "action": "allow_passthrough", "reason": "stop_hook_active"})
         sys.exit(0)
 
+    # Dispatch lock: if consult_director already fired this turn, don't double-fire.
+    if get_dispatch_lock():
+        clear_dispatch_lock()  # reset for the next turn
+        log_hook_event({"hook": "Stop", "session_id": session_id, "action": "lock_skipped", "reason": "consult_director already dispatched this turn"})
+        sys.exit(0)
+
     last_text = read_last_assistant_text(transcript_path)
     halt = is_halt(last_text)
 
@@ -37,7 +45,7 @@ def main():
         sys.exit(0)
 
     # Halt detected: invoke brain, inject answer, block the stop so CC continues.
-    brain_answer = answer(last_text)
+    brain_answer = brain_dispatch(last_text)
     log_hook_event({
         "hook": "Stop",
         "session_id": session_id,
@@ -55,4 +63,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:  # noqa: BLE001
+        # FM-19: safe direction on crash = allow CC to stop (exit 0, no block).
+        sys.exit(0)

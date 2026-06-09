@@ -17,7 +17,7 @@ from synthetic_user.types import Deliverable
 from synthetic_user.utils import retry_with_backoff
 
 PROJECT_ROOT = Path(__file__).parent.parent
-_CC_TIMEOUT = 300  # seconds; real tasks may take several minutes
+_CC_TIMEOUT = 600  # seconds; triple-check adds ~3 × 30s of nested LLM calls
 
 
 # ---------------------------------------------------------------------------

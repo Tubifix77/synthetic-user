@@ -35,4 +35,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:  # noqa: BLE001
+        # FM-19: safe direction on crash = allow (exit 0, no deny output).
+        sys.exit(0)

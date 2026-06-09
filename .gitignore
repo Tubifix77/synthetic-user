@@ -39,3 +39,10 @@ config.local.*
 # Claude Code per-machine / personal (do not commit)
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Per-Run hook IPC state (regenerated each run)
+run_state/
+
+# Scratch deliverables produced by CC during live integration test runs
+/hello.py
+/process_transactions.py

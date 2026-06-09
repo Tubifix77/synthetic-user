@@ -14,8 +14,8 @@ import sys
 sys.path.insert(0, "D:/AI/Synthetic")
 
 from mcp.server.fastmcp import FastMCP
-from hooks.brain_stub import answer
-from hooks.state import log_hook_event
+from synthetic_user.brain import dispatch as brain_dispatch
+from hooks.state import log_hook_event, set_dispatch_lock
 
 _mcp = FastMCP("synthetic-user")
 
@@ -31,7 +31,9 @@ def consult_director(question: str, context: str = "") -> str:
         question: The question you would have asked the user.
         context: Relevant context about what you are working on.
     """
-    verdict = answer(question)
+    verdict = brain_dispatch(question, context)
+    # Set the dispatch lock so the Stop hook skips reactive brain dispatch this turn.
+    set_dispatch_lock(True)
     log_hook_event({
         "hook": "consult_director",
         "action": "proactive_dispatch",
