@@ -9,8 +9,12 @@ intervention path, suggest_compact mechanism.
 INTEGRATION TEST — invokes a real `claude -p` subprocess.
 Run with: pytest -m integration
 """
+from pathlib import Path
+
 import pytest
 from synthetic_user.orchestrator import Orchestrator
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 from synthetic_user.memory import Memory
 from synthetic_user.types import Request, StopCode
 from synthetic_user.executor import ClaudeCodeExecutor
@@ -34,7 +38,7 @@ def test_scenario_05_steward_fires_suggest_compact():
     run = orch.run(Request(
         goal=(
             "Write a Python function that returns the square of a number. "
-            "Save it to D:/AI/Synthetic/run_state/square_fn.py, "
+            f"Save it to {_REPO_ROOT / 'run_state' / 'square_fn.py'}, "
             "then Read it back and confirm the content."
         )
     ))

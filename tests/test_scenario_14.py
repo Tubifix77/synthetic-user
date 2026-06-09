@@ -25,7 +25,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-_ROOT = "D:/AI/Synthetic"
+_ROOT = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, _ROOT)
 from hooks.state import read_hooks_log
 
@@ -122,7 +122,7 @@ def test_scenario_14_consult_director_returns_unavailable_on_timeout():
     }
     r = subprocess.run(
         [sys.executable, "-c", (
-            "import sys; sys.path.insert(0, 'D:/AI/Synthetic'); "
+            f"import sys; sys.path.insert(0, {_ROOT!r}); "
             "from synthetic_user.brain import dispatch; "
             "result = dispatch('test question'); "
             "print(result)"

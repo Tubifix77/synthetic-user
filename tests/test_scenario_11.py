@@ -10,12 +10,16 @@ Verifies: steward sustained operation, multi-cycle stability, FM-14 mitigation.
 INTEGRATION TEST — invokes multiple real `claude -p` subprocesses (slow).
 Run with: pytest -m integration
 """
+from pathlib import Path
+
 import pytest
 from synthetic_user.orchestrator import Orchestrator
 from synthetic_user.memory import Memory
 from synthetic_user.types import Request, StopCode, Route
 from synthetic_user.executor import ClaudeCodeExecutor
 from hooks.state import filter_hook_events
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.integration
 
@@ -44,7 +48,7 @@ def test_scenario_11_long_run_survives_5_cycles():
         "Stage 3: write unit tests for all functions. "
         "Stage 4: add a command-line interface. "
         "Stage 5: write a README with usage examples. "
-        "Save everything to D:/AI/Synthetic/run_state/calculator/. "
+        f"Save everything to {_REPO_ROOT / 'run_state' / 'calculator'}/. "
         "Complete each stage fully before moving to the next."
     )))
 
@@ -94,7 +98,7 @@ def test_scenario_11_no_silent_autocompact():
 
     run = orch.run(Request(goal=(
         "Build a simple Python calculator module with add, subtract, multiply, divide. "
-        "Save to D:/AI/Synthetic/run_state/calc2.py with unit tests."
+        f"Save to {_REPO_ROOT / 'run_state' / 'calc2.py'} with unit tests."
     )))
 
     assert run.stop_code in (StopCode.COMPLETE, StopCode.REFINEMENT_COMPLETE)

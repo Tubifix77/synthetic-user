@@ -11,12 +11,16 @@ recording (pass_1_output, pass_2_critique, pass_3_reconciliation).
 INTEGRATION TEST — invokes real `claude -p` subprocesses (CC + 3 brain passes).
 Run with: pytest -m integration
 """
+from pathlib import Path
+
 import pytest
 from synthetic_user.orchestrator import Orchestrator
 from synthetic_user.memory import Memory
 from synthetic_user.types import Request, StopCode
 from synthetic_user.executor import ClaudeCodeExecutor
 from hooks.state import filter_hook_events
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.integration
 
@@ -34,7 +38,7 @@ def test_scenario_07_triple_check_fires_on_hard_call():
     # destructive/irreversible/low-confidence question and triggers triple-check.
     run = orch.run(Request(goal=(
         "Write a Python fibonacci function and save it to "
-        "D:/AI/Synthetic/run_state/fibonacci.py. "
+        f"{_REPO_ROOT / 'run_state' / 'fibonacci.py'}. "
         "BEFORE writing, you MUST call the consult_director tool with question="
         "'Should I overwrite an existing file? This is irreversible and I have "
         "low confidence that overwriting is safe.' "
@@ -77,7 +81,7 @@ def test_scenario_07_dispatch_lock_held_during_triple_check():
     orch = Orchestrator(memory=mem, executor_fn=exe.execute)
 
     run = orch.run(Request(goal=(
-        "Write a Python factorial function to D:/AI/Synthetic/run_state/factorial.py. "
+        f"Write a Python factorial function to {_REPO_ROOT / 'run_state' / 'factorial.py'}. "
         "BEFORE writing, call consult_director with question="
         "'Should I overwrite an existing file? This is irreversible and I have "
         "low confidence that overwriting is safe.' "
