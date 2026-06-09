@@ -1196,3 +1196,75 @@ Honest framing: this is established technique (ChatEval 2023; PoLL 2024; "Many M
 New failure mode FM-21 (hat-collapse / false consensus). Architecture now at **21 failure modes**; scenario 8 extended to exercise the panel (15 scenarios unchanged).
 
 **Architecture status: all five current-science-audit findings are addressed (four adjusted in v1.4, one resolved in v1.5); all design TBDs are resolved. The v1 design is complete — what remains is building it.**
+
+
+---
+
+## 12. Build status — what was actually implemented
+
+> This section is an **append** to the locked v1.5 design above. Sections 0–11 are the design and remain the source of truth for *intent*. This section records what was *built* during the first implementation pass, where the build matched the design, and the few places it deliberately diverged. Where this section and the design disagree about a concrete mechanism, this section describes the running system.
+
+### 12.1 Status
+
+The first full build pass is complete. All fifteen acceptance scenarios (section 10.3) pass against a live `claude -p` subprocess. The build followed the acceptance-test-driven discipline of section 10: each scenario was written as a failing test before the production code that satisfied it, and LLM-calling components were never mocked.
+
+Build order followed section 10.4: 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
+
+### 12.2 The one substrate divergence (and why)
+
+The design (sections 1.5, 2.9, and the CLAUDE.md substrate note) anticipated the steering control surfaces — seeder, director/brain, evaluator hats, steward analysis — being implemented as **Claude Code subagents** in `.claude/agents/`, with hooks providing only the mechanical interception.
+
+The build instead implements the steering surface as **hooks plus a project-scope MCP server**, with no subagents:
+
+- **Proactive steering** is an MCP tool, `consult_director`, exposed by a FastMCP server (`director_mcp/consult_director_server.py`, registered in `.mcp.json`). The framework calls the tool mid-task instead of stopping; the brain answers; the framework continues without halting.
+- **Reactive steering** is the `Stop` hook (`hooks/stop_handler.py`) running a halt-language router (`hooks/router.py`). When the framework emits a question or halt-language instead of finishing, the router catches it, the brain resolves it, and the resolution is injected back as `additionalContext` so the same session continues.
+- **The brain itself** (`synthetic_user/brain.py`) is a plain module that calls `claude -p` directly for its reasoning passes, rather than being a subagent definition.
+
+Why the divergence: in practice the hook + MCP surface is the cleaner and better-documented integration boundary. It keeps the executor as the single main Claude Code thread (which the design already insisted on — subagents lose parent context and are weaker at coding), it makes both steering paths inspectable as ordinary subprocess calls and JSON-RPC, and it avoids coupling the control logic to the subagent lifecycle. The interfaces the design specified are all honoured; only their *hosting* changed. The cross-family Adversary-hat compromise (section 12.5) is unaffected.
+
+### 12.3 What maps directly from design to code
+
+| Design (section) | Implementation |
+|---|---|
+| Run / Cycle / turn vocabulary (§0) | `synthetic_user/types.py` (`Run`, `Cycle`, `Route`, `StopCode`) |
+| Triage gate (§2.0) | `synthetic_user/triage.py` — Stage-1 rule + Stage-2 classifier |
+| Seeder reflection + cold start (§2.1) | `synthetic_user/seeder.py` |
+| Steering brain + triple-check (§2.4) | `synthetic_user/brain.py` |
+| Context steward (§2.7) | `hooks/post_tool_use_handler.py` + `hooks/state.py` token counter |
+| Evaluator, 3-layer + multi-hat panel (§2.5, §2.6 write-gating, v1.5) | `synthetic_user/evaluator.py` — sole memory writer |
+| Decision Reports schema + buffer (§2.8) | `synthetic_user/reports.py` |
+| Memory + query (§2.6) | `synthetic_user/memory.py` — `query_reports` |
+| Hybrid dispatch, proactive + reactive (§2.9) | `consult_director` MCP tool + `Stop` hook router |
+| Dispatch lock (FM-15/§2.9) | `hooks/state.py` dispatch-lock + `SYNTH_IN_TRIPLE_CHECK` env guard |
+| Post-hoc dispatch-escape detection (FM-18) | evaluator audit, exercised by scenario 13 |
+| Orchestrator (§2.9) | `synthetic_user/orchestrator.py` — thin; owns state + report buffer |
+| Executor = the framework (§2.2) | `synthetic_user/executor.py` `ClaudeCodeExecutor` — drives `claude -p`, resumes sessions |
+
+### 12.4 v1 implementations that stand in for fuller designs
+
+These are honest, working implementations of the architecture's *interfaces*, deliberately simpler than the eventual target. Each is designed as a swap, not a rewrite:
+
+- **Memory is in-process** (`memory.py` holds Decision Reports in a list with a real query interface). The design's four-store SQLite + vector-memory model (§2.5/2.6) is the upgrade. The single-writer rule (evaluator only) is already enforced, so the storage backend can change underneath without touching callers.
+- **Brain escalation is keyword-triggered** (`brain.py` `_is_hard_call` matches a hard-call keyword set, then runs the triple-check). The design's LLM-reflective "is this consequential?" judgement is the upgrade. The triple-check pipeline itself (answer → critique → reconcile) is real.
+- **The seeder's multi-lens reflection is a structured stub** that drives correct cycle/stop behaviour and emits the right Decision Reports. Scenario 15's fixture-based gate (~83% agreement, with a deliberate honest miss) is precisely the instrument the design calls for to decide when to replace it with LLM-backed reflection.
+
+### 12.5 Substrate facts confirmed at build time
+
+- The system runs on a **Claude subscription / enterprise seat** via the official `claude` CLI driven headlessly (`claude -p`). No metered API key; no OAuth-token lifting. This honours the ToS posture in the substrate decision.
+- The Adversary hat (v1.5 Layer 2) runs on a **different model tier** (Haiku) rather than a different model family — subscription-only Claude Code makes every call a Claude call. The design flagged this as a known compromise; the hat interface is built so that routing it to a cross-family provider (Bedrock/Vertex/other) is a configuration swap. See `synthetic_user/config.py` `MODEL_TIERS`.
+- Per-role model tiers live in `config.py`; pass thresholds and the cycle safety bound are there too.
+
+### 12.6 Integration lessons worth preserving
+
+Hard-won facts about the Claude Code integration surface, recorded so they are not re-derived:
+
+- **MCP servers must be registered in `.mcp.json`** (project root), *not* in `.claude/settings.json`. A `mcpServers` block in `settings.json` is silently ignored.
+- **MCP tools are not covered by `--dangerously-skip-permissions`.** Each tool must be explicitly allowed (e.g. `mcp__synthetic-user__consult_director` in `settings.json` → `permissions.allow`).
+- **`PostToolUse` only fires for tools that actually execute.** If the framework's permission layer blocks a tool before execution (for example a write outside the project), the hook never runs — so the steward sees nothing for that call.
+- **Do not name a local package directory `mcp/`** — it shadows the installed `mcp` package and crashes the FastMCP import. The server lives in `director_mcp/` for this reason.
+- **Session-state directories are keyed once per Run** and must not be re-pointed after the framework returns its real session id, or hook output written under the original key becomes unreadable.
+
+### 12.7 Known rough edges (not yet addressed)
+
+- **Hook and MCP paths in `.claude/settings.json` and `.mcp.json` are absolute** (`D:/AI/Synthetic/...`). The system therefore does not yet run unchanged from a clone in a different location; the paths must be edited, or made relative, before the "identical on any machine" goal in CLAUDE.md holds. See OPERATIONS.md.
+- The fuller memory backend, LLM-reflective brain escalation, and LLM-backed seeder reflection (§12.4) remain as planned upgrades behind stable interfaces.
