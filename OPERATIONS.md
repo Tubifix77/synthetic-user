@@ -79,7 +79,7 @@ git clone https://github.com/Tubifix77/synthetic-user.git
 cd synthetic-user
 ```
 
-If you already have it, just `cd` into it. (The reference machine keeps it at `D:\AI\Synthetic`; see the path caveat in section 7.)
+If you already have it, just `cd` into it. The repo is location-independent — it runs correctly from wherever you clone it (all hook and MCP paths resolve relative to the repo root), so there is nothing to configure after cloning.
 
 **Step 4.2 — Install the package and test dependencies.**
 
@@ -87,7 +87,9 @@ If you already have it, just `cd` into it. (The reference machine keeps it at `D
 pip install -e ".[dev]"
 ```
 
-This installs the project in editable mode plus `pytest`. The runtime itself has almost no third-party dependencies — the heavy lifting is done by the `claude` CLI as a subprocess. The one external piece is the MCP SDK used by the director server; if the MCP server fails to start later with an import error, install it explicitly:
+This installs the project in editable mode plus `pytest`. The runtime leans on the `claude` CLI (run as a subprocess) for the heavy lifting; its one third-party dependency is the MCP SDK (`mcp`), used by the `consult_director` server that powers the proactive steering path. It is declared in `pyproject.toml`, so the command above installs it automatically — you do not need a separate step.
+
+If you ever see the MCP server fail to start with an import error (for example after a partial install), install it explicitly:
 
 ```
 pip install mcp
@@ -186,14 +188,11 @@ What to expect:
 - `SYNTH_EVAL_ANOMALY_THRESHOLD` — forces the evaluator's Layer-2 multi-hat panel to fire (scenario 8).
 - `SYNTH_IN_TRIPLE_CHECK` — internal dispatch lock the brain sets on itself during a triple-check; not for manual use.
 
-### The path caveat (read this if you cloned to a new location)
+### Paths are repo-relative (no editing needed)
 
-The committed `.claude/settings.json` (hook commands) and `.mcp.json` (MCP server command) currently use **absolute paths** pointing at `D:/AI/Synthetic/...`. This is a known rough edge (architecture2.md §12.7). If you cloned the repo somewhere else, the hooks and the `consult_director` server will not be found until you update those paths:
+The committed `.claude/settings.json` (hook commands) and `.mcp.json` (MCP server command) use **repo-relative paths** — `python hooks/<handler>.py` and `director_mcp/consult_director_server.py`. Claude Code runs hooks and the MCP server with the working directory set to the repo root (and exposes `CLAUDE_PROJECT_DIR`), and the Python handlers also self-locate via their own file path. The upshot: **you do not edit these files when you clone or move the repo** — it works from any location as-is. (Do not hardcode an absolute path into them; that would re-break portability.)
 
-- In **`.claude/settings.json`**, every hook `command` has a hardcoded `python D:/AI/Synthetic/hooks/...` — change the directory to your clone location.
-- In **`.mcp.json`**, the server `args` entry points at `D:/AI/Synthetic/director_mcp/consult_director_server.py` — change it the same way.
-
-After editing those two files, fully restart any `claude` session so it re-reads them. The fast tests (section 5.1) don't touch hooks or MCP and will pass regardless; the integration tests (5.2) need the paths correct.
+If you do change `.claude/settings.json` or `.mcp.json` for any other reason, fully restart any `claude` session afterward so it re-reads them.
 
 ---
 
@@ -216,7 +215,7 @@ When the executor (Claude Code) runs your task, there are two ways it gets direc
 - Autonomous iteration with clear success criteria → continue in loop mode, no consult needed
 - The two paths cover uncorrelated failure modes: if proactive is missed, reactive catches halt-language; if halt-language is ambiguous, proactive still works.
 
-In practice you'll never see the reactive path fire in normal runs — it exists for robustness (scenarios FM-10, FM-18). If you do see it, that's a signal the SessionStart instruction needs hardening or the executor ignored it for some reason.
+In practice you'll never see the reactive path fire in normal runs — it exists for robustness (it guards the dispatch failure modes in architecture2.md §6). If you do see it, that's a signal the SessionStart instruction needs hardening or the executor ignored it for some reason.
 
 ---
 
