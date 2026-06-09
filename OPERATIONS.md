@@ -69,6 +69,9 @@ Once `claude -p` returns real output, the hard part is done.
 
 ## 4. Get the code and install
 
+> **Quick setup:** To automate sections 4–5, run `python bootstrap.py` from the repo root. It checks prerequisites, installs the package, verifies authentication, smoke-tests headless execution, and runs the fast test suite — stopping with an actionable message on the first failure.
+
+
 **Step 4.1 — Clone (or locate) the repo.**
 
 ```
@@ -194,7 +197,30 @@ After editing those two files, fully restart any `claude` session so it re-reads
 
 ---
 
-## 8. Troubleshooting
+## 8. How steering works (proactive vs reactive paths)
+
+When the executor (Claude Code) runs your task, there are two ways it gets direction mid-execution:
+
+**Proactive path (preferred, always-on in normal operation):**
+- At session start, the `SessionStart` hook injects an instruction telling the executor: "When you would ask the user a question, call the `consult_director` MCP tool instead."
+- The executor calls `consult_director(question, context)` mid-turn, the steering brain answers synchronously, and execution continues without halting — no pause, no turn boundary.
+- **This is the default behavior.** Any goal that includes explicit instruction to "ask a clarifying question before proceeding" will naturally use this path.
+
+**Reactive path (fallback, only when proactive fails):**
+- If the executor doesn't call `consult_director` but instead outputs halt-language (question text directed at "the user"), the `Stop` hook's router classifies the turn.
+- If classified as a halt (matched against known question patterns), the brain is invoked reactively, returns an answer via `additionalContext`, and the executor continues in the same session.
+- This path is a safety net. If the executor forgets to consult, or `consult_director` is unreachable, the reactive hook still catches explicit questions.
+
+**Routing rule:**
+- "Ask a clarifying question" → proactive `consult_director` path (executor uses the tool as instructed)
+- Autonomous iteration with clear success criteria → continue in loop mode, no consult needed
+- The two paths cover uncorrelated failure modes: if proactive is missed, reactive catches halt-language; if halt-language is ambiguous, proactive still works.
+
+In practice you'll never see the reactive path fire in normal runs — it exists for robustness (scenarios FM-10, FM-18). If you do see it, that's a signal the SessionStart instruction needs hardening or the executor ignored it for some reason.
+
+---
+
+## 9. Troubleshooting
 
 **`claude -p` says "Not logged in".** The headless CLI has no credentials. Redo section 3.2 in a plain terminal and make sure you finished the browser OAuth flow. Confirm with `claude auth status`.
 
@@ -212,7 +238,7 @@ After editing those two files, fully restart any `claude` session so it re-reads
 
 ---
 
-## 9. What this manual does not cover
+## 10. What this manual does not cover
 
 - **The design rationale** — why there are exactly these roles, what the twenty-one failure modes are, how the multi-hat evaluator resolves "who validates the validator." That's [architecture2.md](architecture2.md).
 - **Upgrading the v1 stand-ins** — moving memory to SQLite + vector storage, making brain escalation LLM-reflective rather than keyword-triggered, making the seeder's reflection LLM-backed. These are planned swaps behind stable interfaces (architecture2.md §12.4); they are development work, not operations.

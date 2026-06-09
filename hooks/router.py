@@ -17,6 +17,7 @@ _HALT_PATTERNS = [
     r"I (?:need|would like) (?:to (?:ask|know|confirm|clarify)|more information|your (?:input|confirmation|clarification))",
     r"(?:please )?(?:let me know|tell me) (?:what|which|how|if|whether)",
     r"what (?:would you like|do you (?:want|prefer))",
+    r"what .{0,60}should\b",
     r"(?:can|could) you (?:clarify|confirm|specify|tell me|let me know|provide)",
     r"I have (?:a (?:few )?)?questions?",
     r"I(?:'d| would) (?:need|like) (?:to know|clarification|more details)",

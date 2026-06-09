@@ -43,6 +43,14 @@ CLAUDE.local.md
 # Per-Run hook IPC state (regenerated each run)
 run_state/
 
-# Scratch deliverables produced by CC during live integration test runs
+# Scratch deliverables produced by CC during live integration test runs.
+# These are throwaway files written into the repo root by scenarios that ask
+# CC to "write a function" etc. Listed explicitly (not /*.py) so real root-level
+# files like bootstrap.py stay tracked.
 /hello.py
 /process_transactions.py
+/process_list.py
+/square_fn.py
+/fibonacci.py
+/factorial.py
+/calc2.py
