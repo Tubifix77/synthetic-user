@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/AI/Synthetic/hooks/session_start_handler.py"
+            "command": "python hooks/session_start_handler.py"
           }
         ]
       }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/AI/Synthetic/hooks/stop_handler.py"
+            "command": "python hooks/stop_handler.py"
           }
         ]
       }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/AI/Synthetic/hooks/pre_tool_use_handler.py"
+            "command": "python hooks/pre_tool_use_handler.py"
           }
         ]
       }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/AI/Synthetic/hooks/post_tool_use_handler.py"
+            "command": "python hooks/post_tool_use_handler.py"
           }
         ]
       }

@@ -11,7 +11,7 @@ NOTE: This file lives in director_mcp/ (not mcp/) to avoid shadowing the install
 """
 import sys
 
-sys.path.insert(0, "D:/AI/Synthetic")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
 from mcp.server.fastmcp import FastMCP
 from synthetic_user.brain import dispatch as brain_dispatch

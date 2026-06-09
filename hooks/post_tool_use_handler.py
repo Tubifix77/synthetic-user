@@ -18,7 +18,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, "D:/AI/Synthetic")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 from hooks.state import add_counted_tokens, log_hook_event
 
 # Default threshold: 60% of 200k-token context window.

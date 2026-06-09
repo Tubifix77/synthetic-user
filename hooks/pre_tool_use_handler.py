@@ -8,7 +8,7 @@ Also reads the interrupt flag set by the context steward.
 import json
 import sys
 
-sys.path.insert(0, "D:/AI/Synthetic")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 from hooks.state import get_interrupt_flag, log_hook_event
 
 

@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "python",
       "args": [
-        "D:/AI/Synthetic/director_mcp/consult_director_server.py"
+        "director_mcp/consult_director_server.py"
       ],
       "env": {}
     }

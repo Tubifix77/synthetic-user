@@ -11,11 +11,10 @@ iteration. We must not block again (infinite-loop guard; CC enforces max 8).
 import json
 import sys
 
-sys.path.insert(0, "D:/AI/Synthetic")
+_REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _REPO_ROOT)
 from hooks.router import is_halt, read_last_assistant_text
 from hooks.state import log_hook_event, get_dispatch_lock, clear_dispatch_lock
-
-sys.path.insert(0, "D:/AI/Synthetic")
 from synthetic_user.brain import dispatch as brain_dispatch
 
 
