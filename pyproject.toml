@@ -13,6 +13,12 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[tool.setuptools]
+# Only synthetic_user is an importable package. hooks/ and director_mcp/ are
+# invoked by path (via .claude/settings.json and .mcp.json), not imported, so
+# they are deliberately excluded from package discovery.
+packages = ["synthetic_user"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
