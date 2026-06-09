@@ -4,16 +4,23 @@ end-to-end through stub components. Thin by design; owns state and the report bu
 Real version spawns/maintains Claude Code sessions; here the executor is stubbed.
 """
 from __future__ import annotations
+from typing import Callable
 from synthetic_user import config, triage as triage_mod, seeder, executor, evaluator
-from synthetic_user.types import Request, Route, Run, Cycle
+from synthetic_user.types import Deliverable, Request, Route, Run, Cycle
 from synthetic_user.reports import ReportBuffer
 from synthetic_user.memory import Memory
 
 
 class Orchestrator:
-    def __init__(self, memory: Memory, config=config) -> None:
+    def __init__(
+        self,
+        memory: Memory,
+        config=config,
+        executor_fn: Callable[[str], Deliverable] | None = None,
+    ) -> None:
         self.memory = memory
         self.config = config
+        self._execute = executor_fn or executor.execute
 
     def run(self, request: Request) -> Run:
         buffer = ReportBuffer()
@@ -32,7 +39,7 @@ class Orchestrator:
 
         for i in range(self.config.MAX_CYCLES_PER_RUN):
             cycle = Cycle(index=i, goal=goal)
-            cycle.deliverable = executor.execute(goal)
+            cycle.deliverable = self._execute(goal)
             cycle.score = evaluator.evaluate(cycle, criteria, buffer)
             run.cycles.append(cycle)
 

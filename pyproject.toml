@@ -17,3 +17,6 @@ dev = ["pytest>=8"]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: tests that invoke a real `claude -p` subprocess (slow, requires CC auth)",
+]
