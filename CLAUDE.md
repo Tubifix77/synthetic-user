@@ -1,4 +1,6 @@
-# Synthetic User — Claude Code project guide
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this project is
 A closed-loop control system that wraps Claude Code (the executor) with the
@@ -34,6 +36,27 @@ GitHub remote: `github.com/Tubifix77/synthetic-user`.
 - `architecture2.md` section 0 — vocabulary (cycle / turn / Run mapping).
 - `OPERATIONS.md` — install, authenticate, run the suite, drive a Run.
 
+## Commands
+Run from the repo root. **No linter or formatter is configured** — `pytest` is the
+only tooling; don't add or assume a lint step.
+
+- **Install** (editable + test deps): `pip install -e ".[dev]"`
+- **One-shot setup/verify**: `python bootstrap.py` — checks prereqs, installs,
+  verifies `claude` auth, smoke-tests headless exec, then runs the fast suite,
+  stopping on the first failure with an actionable message.
+- **Auth precondition** (the wrapper drives the CLI headlessly — get this green
+  first): `claude -p "reply with OK" --output-format json` → want `is_error:false`.
+- **Fast tests** (pure Python, no LLM, seconds — scenarios 1/2/9/15 + the
+  halt-router unit test): `python -m pytest -m "not integration"`
+- **Integration tests** (drive a live `claude -p`; minutes each; cost real plan
+  usage; need a logged-in CLI): `python -m pytest -m integration`
+- **A single scenario**: `python -m pytest tests/test_scenario_07.py -v`
+- **The whole suite** (a clean run is the 15 scenarios passing): `python -m pytest`
+
+After editing `.claude/settings.json` or `.mcp.json`, fully restart any `claude`
+session so it re-reads them. Test-only env knobs that force rare paths
+deterministically (e.g. `SYNTH_REACTIVE_TEST=1`) are listed in OPERATIONS.md §7.
+
 ## How the system actually attaches to Claude Code (as built)
 The wrapper drives the official `claude` CLI headlessly (`claude -p`) and
 intercepts the framework through two mechanisms it already exposes:
@@ -55,6 +78,37 @@ path still works). Both verified end-to-end (scenarios 3 and 4).
 > control surfaces as Claude Code **subagents** in `.claude/agents/`. The build
 > used **hooks + an MCP server** instead — the cleaner integration surface in
 > practice. There are no subagents. See §12.2 for the reasoning.
+
+## Code map (concern → file)
+Two cross-cutting invariants explain most of the wiring, and neither is visible
+from a single file:
+- **One Run = one `claude` session**, resumed across cycles (`executor.py` holds
+  `session_id` and passes `--resume`).
+- **The evaluator is the only writer to memory.** Every other component emits
+  Decision Reports into a per-Run buffer (`reports.py`); the evaluator drains it
+  to `memory.py` at each cycle close. Do not write memory from anywhere else.
+
+The control wrapper is `synthetic_user/` (plain modules that shell out to
+`claude -p` for their own reasoning passes). `hooks/` and `director_mcp/` are the
+Claude Code interception surface — **path-invoked, never imported** (hence absent
+from the installed package).
+
+| Concern | File |
+|---|---|
+| Run loop: triage → seeder → execute → evaluate → reflect; owns state + buffer | `synthetic_user/orchestrator.py` |
+| Request router (Stage-1 rule + Stage-2 classifier) | `synthetic_user/triage.py` |
+| Cycle-boundary reflection, cold start, stop codes | `synthetic_user/seeder.py` |
+| Steering brain: dispatch + triple-check escalation (`_is_hard_call`) | `synthetic_user/brain.py` |
+| 3-layer eval + multi-hat panel; **sole memory writer** | `synthetic_user/evaluator.py` |
+| Decision Report store + `query_reports` (in-process v1) | `synthetic_user/memory.py` |
+| Decision Report schema + per-Run buffer | `synthetic_user/reports.py` |
+| `ClaudeCodeExecutor`: drives `claude -p`, resumes the session | `synthetic_user/executor.py` |
+| Shared vocabulary: Run, Cycle, Route, StopCode | `synthetic_user/types.py` |
+| Tunables + per-role model tiers | `synthetic_user/config.py` |
+| Reactive steering: Stop-hook + halt-language classifier | `hooks/stop_handler.py`, `hooks/router.py` |
+| Steward (token tracking) + action-pattern triggers | `hooks/post_tool_use_handler.py`, `hooks/pre_tool_use_handler.py` |
+| Per-Run hook IPC: hooks log, dispatch lock, token counter | `hooks/state.py` |
+| Proactive steering: `consult_director` FastMCP server | `director_mcp/consult_director_server.py` |
 
 ## How we build (non-negotiable)
 - Acceptance-test-driven. Write the scenario as an executable test that fails
@@ -115,6 +169,9 @@ path still works). Both verified end-to-end (scenarios 3 and 4).
   brain escalation are deliberate v1 stand-ins behind stable interfaces (the
   upgrades — SQLite + vector memory, LLM-reflective escalation — are swaps, not
   rewrites; see §12.4).
-- Known-flaky: `test_scenario_03` (reactive Stop-hook) depends on headless
-  `claude -p` reliably emitting halt-language and is nondeterministic; wiring is
-  correct, the prompt needs hardening.
+- `test_scenario_03` (reactive Stop-hook) — formerly known-flaky, now **resolved
+  and deterministic**: it drives the executor directly (bypassing live-LLM
+  triage), dictates the exact clarifying question, and asserts both
+  `halt_intercepted` and `allow_passthrough`. The halt regex is pinned by a fast
+  unit test (`tests/test_router_halt_patterns.py`) so the false-positive
+  regression cannot silently return. See §12.7.
