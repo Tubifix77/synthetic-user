@@ -63,7 +63,12 @@ _REQUEST_RE = re.compile(
     r"|your (?:input|confirmation|guidance|clarification|direction|decision))\b"
     r"|\b(?:could|can) you (?:please )?"
     r"(?:clarify|confirm|specify|tell me|let me know|provide|elaborate)\b"
-    r"|\b(?:please|kindly) (?:let me know|clarify|confirm|specify)\b"
+    r"|\b(?:please|kindly) (?:let me know|clarify|confirm|specify|approve|grant|allow)\b"
+    # Asking the operator to unblock a denied tool. Anchored to "your" so a
+    # description of someone else's approval step ("requires approval from CI")
+    # stays completion prose.
+    r"|\b(?:requires?|needs?|awaiting|waiting (?:for|on)) your "
+    r"(?:approval|permission|go-ahead|sign-off)\b"
     r"|\bI have (?:an?|a few|a couple of|some)? ?questions?\b",
     re.IGNORECASE,
 )
@@ -133,8 +138,8 @@ def read_tool_calls_from_transcript(transcript_path: str) -> list[dict]:
 
     Each entry has at minimum: ``tool_name``, ``turn_index``, and ``input``
     (the dict passed to the tool).  Useful for verifying that a named tool
-    (e.g. ``consult_director``) was actually invoked during the run without
-    relying solely on the MCP-server hook log.
+    (e.g. the director command) was actually invoked during the run without
+    relying solely on the director's own hook-log entry.
     """
     path = Path(transcript_path)
     if not path.exists():
@@ -168,3 +173,28 @@ def read_tool_calls_from_transcript(transcript_path: str) -> list[dict]:
                     "turn_index": turn_index,
                 })
     return calls
+
+
+def read_first_user_text(transcript_path: str) -> str:
+    """Return the text of the first user message in the CC transcript — the goal
+    the executor handed this session (context for action verdicts)."""
+    path = Path(transcript_path)
+    if not transcript_path or not path.exists():
+        return ""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            msg = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        message = msg.get("message", msg)
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            text = "\n".join(b.get("text", "") for b in content
+                             if isinstance(b, dict) and b.get("type") == "text")
+            if text.strip():
+                return text
+    return ""

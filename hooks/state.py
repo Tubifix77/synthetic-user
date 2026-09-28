@@ -1,8 +1,8 @@
 """Per-Run state files for hook handlers (architecture2.md section 2.9).
 
 The executor sets SYNTH_SESSION_DIR before spawning CC. Hook handlers use it to
-locate their shared state. If the env var is absent (manual CC run), everything
-degrades gracefully to no-ops.
+locate their shared state. If the env var is absent (manual CC run, or an internal
+reasoning call), the handlers are inert — see in_run().
 """
 from __future__ import annotations
 import json
@@ -15,6 +15,22 @@ def session_dir() -> Path | None:
     """Return the per-session state directory, or None if not set."""
     d = os.environ.get("SYNTH_SESSION_DIR")
     return Path(d) if d else None
+
+
+def in_run() -> bool:
+    """True only inside a Run. The executor is the only thing that sets
+    SYNTH_SESSION_DIR, so an interactive session in this repo and the wrapper's
+    own internal `claude -p` calls (which strip it) both read as "not a Run" —
+    and every hook handler must then do nothing at all."""
+    return session_dir() is not None
+
+
+def read_payload() -> dict:
+    """The hook's JSON payload from stdin, decoded as UTF-8 (what Claude Code
+    writes) rather than the platform default — cp1252 on Windows crashes on some
+    bytes, and a PreToolUse crash before matching would skip the guardrail."""
+    import sys
+    return json.loads(sys.stdin.buffer.read().decode("utf-8"))
 
 
 def log_hook_event(event: dict) -> None:

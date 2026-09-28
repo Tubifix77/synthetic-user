@@ -8,8 +8,9 @@ human-operator roles that normally sit around an agentic loop: triage,
 seeding/direction, in-flight steering, context stewardship, and post-hoc
 evaluation.
 
-**The build is complete.** All 15 acceptance scenarios pass against a live
-`claude -p` subprocess. The design phase (v1.5) is locked; what exists now is a
+**The build is complete.** All 17 acceptance scenarios pass against a live
+`claude -p` subprocess (16 and 17, for the PreToolUse guardrails, landed in the
+2026-09-28 hardening pass). A local web UI + `synth` CLI front the system. The design phase (v1.5) is locked; what exists now is a
 working system. Current work is hardening, portability, tooling, and replacing
 v1 stand-ins with fuller implementations — not greenfield building.
 
@@ -32,7 +33,7 @@ GitHub remote: `github.com/Tubifix77/synthetic-user`.
 - `architecture2.md` section 10 — implementation strategy + the 15 acceptance
   scenarios (the original build plan; all done).
 - `architecture2.md` section 2.9 — integration surface design (note: built as
-  hooks + an MCP server, not subagents — see §12.2).
+  hooks + a director command, not subagents or an MCP server — see §12.2, §12.9).
 - `architecture2.md` section 0 — vocabulary (cycle / turn / Run mapping).
 - `OPERATIONS.md` — install, authenticate, run the suite, drive a Run.
 
@@ -46,14 +47,19 @@ only tooling; don't add or assume a lint step.
   stopping on the first failure with an actionable message.
 - **Auth precondition** (the wrapper drives the CLI headlessly — get this green
   first): `claude -p "reply with OK" --output-format json` → want `is_error:false`.
-- **Fast tests** (pure Python, no LLM, seconds — scenarios 1/2/9/15 + the
-  halt-router unit test): `python -m pytest -m "not integration"`
+- **Fast tests** (pure Python, no LLM, seconds — scenarios 1/2/9/15 + unit tests
+  for the halt router, action patterns, hook gating, model routing, permissions,
+  subprocess hygiene): `python -m pytest -m "not integration"`
 - **Integration tests** (drive a live `claude -p`; minutes each; cost real plan
   usage; need a logged-in CLI): `python -m pytest -m integration`
 - **A single scenario**: `python -m pytest tests/test_scenario_07.py -v`
-- **The whole suite** (a clean run is the 15 scenarios passing): `python -m pytest`
+- **The whole suite** (a clean run is the 17 scenarios passing): `python -m pytest`
+- **Run it like a user**: `python -m synthetic_user` (web UI on localhost:8765),
+  `python -m synthetic_user doctor`, `python -m synthetic_user run "goal"`.
+  `start.bat` is the Windows double-click launcher. (`synth` is the same entry
+  point but its Scripts dir is often not on PATH on Windows.)
 
-After editing `.claude/settings.json` or `.mcp.json`, fully restart any `claude`
+After editing `.claude/settings.json`, fully restart any `claude`
 session so it re-reads them. Test-only env knobs that force rare paths
 deterministically (e.g. `SYNTH_REACTIVE_TEST=1`) are listed in OPERATIONS.md §7.
 
@@ -64,11 +70,15 @@ intercepts the framework through two mechanisms it already exposes:
 - **Hooks** (`.claude/settings.json`): `SessionStart` injects operating
   instructions, `Stop` runs the halt-language router (reactive steering),
   `PreToolUse` feeds action-pattern triggers, `PostToolUse` feeds the context
-  steward. Hook commands are CWD-relative (`python hooks/<handler>.py`); Claude
-  Code runs them with CWD = repo root and also sets `CLAUDE_PROJECT_DIR`.
-- **An MCP tool** (`.mcp.json` → `director_mcp/consult_director_server.py`):
-  `consult_director` is the proactive steering path — the framework calls it
-  instead of stopping to ask, the brain answers, the framework continues.
+  steward. Hook commands are anchored on `$CLAUDE_PROJECT_DIR`
+  (`python "$CLAUDE_PROJECT_DIR/hooks/<handler>.py"`) — hooks run in the session's
+  *current* directory, so a CWD-relative command breaks after the framework `cd`s,
+  and a hook that can't start fails open (scenario 17).
+- **A director command** (`python -m synthetic_user.director "question" "context"`,
+  run through Claude's Bash tool): the proactive steering path — the framework
+  runs it instead of stopping to ask, the brain answers on stdout, the framework
+  continues in the same turn. It was an MCP server until company policy allowed
+  only official MCP servers (§12.9); there is deliberately no `.mcp.json`.
 
 These cover uncorrelated failure modes (if the framework forgets to consult, the
 Stop hook still catches halt-language; if halt-language is ambiguous, the consult
@@ -76,7 +86,8 @@ path still works). Both verified end-to-end (scenarios 3 and 4).
 
 > Note: the original design (and earlier versions of this file) anticipated the
 > control surfaces as Claude Code **subagents** in `.claude/agents/`. The build
-> used **hooks + an MCP server** instead — the cleaner integration surface in
+> used **hooks + a proactive-steering endpoint** (first an MCP server, now a
+> Bash-invoked command) instead — the cleaner integration surface in
 > practice. There are no subagents. See §12.2 for the reasoning.
 
 ## Code map (concern → file)
@@ -89,7 +100,7 @@ from a single file:
   to `memory.py` at each cycle close. Do not write memory from anywhere else.
 
 The control wrapper is `synthetic_user/` (plain modules that shell out to
-`claude -p` for their own reasoning passes). `hooks/` and `director_mcp/` are the
+`claude -p` for their own reasoning passes). `hooks/` is the
 Claude Code interception surface — **path-invoked, never imported** (hence absent
 from the installed package).
 
@@ -104,11 +115,13 @@ from the installed package).
 | Decision Report schema + per-Run buffer | `synthetic_user/reports.py` |
 | `ClaudeCodeExecutor`: drives `claude -p`, resumes the session | `synthetic_user/executor.py` |
 | Shared vocabulary: Run, Cycle, Route, StopCode | `synthetic_user/types.py` |
-| Tunables + per-role model tiers | `synthetic_user/config.py` |
+| Tunables, per-role model tiers (`model_for` — the only place a model is chosen), executor permission grants | `synthetic_user/config.py` |
 | Reactive steering: Stop-hook + halt-language classifier | `hooks/stop_handler.py`, `hooks/router.py` |
 | Steward (token tracking) + action-pattern triggers | `hooks/post_tool_use_handler.py`, `hooks/pre_tool_use_handler.py` |
 | Per-Run hook IPC: hooks log, dispatch lock, token counter | `hooks/state.py` |
-| Proactive steering: `consult_director` FastMCP server | `director_mcp/consult_director_server.py` |
+| Proactive steering: the director command (fail-safe answers, off switch, deadline) | `synthetic_user/director.py` |
+| Guardrails: the 4 PreToolUse action patterns + verdict mapping | `hooks/action_patterns.py`, `brain.judge_action` |
+| Front end: Run driver + record, setup checks, CLI, web UI | `synthetic_user/runner.py`, `doctor.py`, `cli.py`, `ui/` |
 
 ## How we build (non-negotiable)
 - Acceptance-test-driven. Write the scenario as an executable test that fails
@@ -130,7 +143,7 @@ from the installed package).
   `ClaudeCodeExecutor`). It does the real work and is never a subagent.
 - The brain, evaluator, seeder, steward logic live as ordinary Python modules
   in `synthetic_user/` that call `claude -p` for their reasoning passes, invoked
-  via the hooks and MCP server above.
+  via the hooks and the director command above.
 
 ## Known compromise on this substrate
 - The evaluator's Adversary hat (v1.5) should run on a DIFFERENT model family for
@@ -153,22 +166,41 @@ from the installed package).
   asked.
 
 ## Integration lessons (hard-won — don't re-derive)
-- MCP servers register in `.mcp.json` (project root), NOT `.claude/settings.json`.
-- MCP tools are not covered by `--dangerously-skip-permissions`; each must be
-  explicitly allowed in `settings.json` → `permissions.allow`.
+- **No MCP servers** — company policy allows only official ones. Don't add a
+  `.mcp.json` (`doctor` warns, `tests/test_no_mcp_server.py` fails). The
+  director is `synthetic_user/director.py`, run via Bash.
+- Director timeouts nest: brain passes → `DIRECTOR_DEADLINE_S` (300 s, then an
+  explicit "director unavailable") → `DIRECTOR_TOOL_TIMEOUT_MS` (480 s, which the
+  PreToolUse hook sets on every director call via `updatedInput`) → the CLI's
+  Bash max (600 s; the executor guarantees it and strips
+  `CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS`). Keep each layer outlasting the one
+  inside it — a director killed mid-answer returns nothing at all.
+- `SYNTH_DIRECTOR_DISABLED=1` is the authoritative way to switch the proactive
+  path off (scenario 3); a Bash deny rule is only a safety net.
 - `PostToolUse` only fires for tools that actually execute — permission-blocked
   tools never trigger it, so the steward sees nothing for those.
-- Don't name a local package dir `mcp/` — it shadows the installed `mcp` package
-  and crashes the FastMCP import. The server lives in `director_mcp/`.
-- `pyproject.toml` declares `synthetic_user` as the sole package; `hooks/` and
-  `director_mcp/` are path-invoked, not imported.
+- `pyproject.toml` declares `synthetic_user` (+ `synthetic_user.ui`) as the only
+  packages; `hooks/` is path-invoked, not imported.
+- Hooks fire for EVERY session in this folder (yours too). Handlers must stay inert
+  unless `SYNTH_SESSION_DIR` is set (`hooks/state.in_run()`).
+- Every internal `claude -p` needs `stdin=subprocess.DEVNULL` (`claude -p` waits
+  on any inherited pipe — it hung the old MCP server) and `encoding="utf-8"` (Windows defaults to cp1252).
+  Fast tests enforce the first.
+- Bypass mode can be disabled by org policy: `--dangerously-skip-permissions` then
+  silently becomes acceptEdits. The executor grants tools explicitly via
+  `--allowedTools` (`config.EXECUTOR_ALLOWED_TOOLS`); keep those grants narrow.
+- Word injected instructions (SessionStart) as honest descriptions, not commands:
+  "no human at the keyboard / you MUST / authoritative" reads as a prompt
+  injection and current models refuse it.
+- No model IDs outside `config.py` — `tests/test_model_tiers.py` fails otherwise.
 
 ## Status
 - Design: v1.5, complete. Tags v1.2-locked, v1.3, v1.4, v1.5 on origin.
-- Build: **all 15 scenarios pass.** In-process memory and keyword-triggered
-  brain escalation are deliberate v1 stand-ins behind stable interfaces (the
-  upgrades — SQLite + vector memory, LLM-reflective escalation — are swaps, not
-  rewrites; see §12.4).
+- Build: **all 17 scenarios pass.** v1 stand-ins behind stable interfaces:
+  in-process memory, keyword-triggered brain escalation, heuristic seeder
+  reflection, and a Layer-1 evaluator that only checks a deliverable exists (so
+  the Layer-2 panel rarely fires on its own). Upgrades are swaps, not rewrites;
+  see §12.4. §12.8 records the 2026-09-28 hardening pass.
 - `test_scenario_03` (reactive Stop-hook) — formerly known-flaky, now **resolved
   and deterministic**: it drives the executor directly (bypassing live-LLM
   triage), dictates the exact clarifying question, and asserts both

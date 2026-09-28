@@ -1,16 +1,11 @@
 {
-  "permissions": {
-    "allow": [
-      "mcp__synthetic-user__consult_director"
-    ]
-  },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/session_start_handler.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/session_start_handler.py\""
           }
         ]
       }
@@ -20,7 +15,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/stop_handler.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/stop_handler.py\"",
+            "timeout": 420
           }
         ]
       }
@@ -30,7 +26,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/pre_tool_use_handler.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/pre_tool_use_handler.py\"",
+            "timeout": 180
           }
         ]
       }
@@ -40,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/post_tool_use_handler.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/post_tool_use_handler.py\""
           }
         ]
       }

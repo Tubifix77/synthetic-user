@@ -15,9 +15,11 @@ import uuid
 from pathlib import Path
 from synthetic_user.types import Deliverable
 from synthetic_user.utils import retry_with_backoff
+from synthetic_user.config import executor_allowed_tools, model_for
 
 PROJECT_ROOT = Path(__file__).parent.parent
-_CC_TIMEOUT = 600  # seconds; triple-check adds ~3 × 30s of nested LLM calls
+_CC_TIMEOUT = 1200  # seconds per turn; must outlast a director call (config.DIRECTOR_TOOL_TIMEOUT_MS) plus the work
+_BASH_MAX_TIMEOUT_MS = 600_000  # the CLI's own default maximum per command
 
 
 # ---------------------------------------------------------------------------
@@ -66,19 +68,28 @@ class ClaudeCodeExecutor:
             "--output-format", "json",
             "--dangerously-skip-permissions",
         ] + self.extra_flags
+        if "--model" not in self.extra_flags:
+            cmd += ["--model", model_for("executor")]
+        # Explicit grants (§12.6): the director command needs its own Bash rule,
+        # settings.json allow rules are ignored in an untrusted workspace, and org
+        # policy may have disabled bypass mode altogether.
+        cmd += ["--allowedTools", *executor_allowed_tools()]
 
         if self.session_id:
             cmd += ["--resume", self.session_id]
 
-        env = {**os.environ, "SYNTH_SESSION_DIR": str(self.state_dir), **self.extra_env}
+        env = self.build_env()
 
         def _run_once() -> dict:
             r = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",  # claude emits UTF-8; the Windows default (cp1252) garbles it
+                errors="replace",
                 cwd=str(self.project_root),
                 env=env,
+                stdin=subprocess.DEVNULL,  # never inherit a pipe: `claude -p` would wait on it
                 timeout=_CC_TIMEOUT,
             )
             if r.returncode != 0:
@@ -112,6 +123,22 @@ class ClaudeCodeExecutor:
                 "cost_usd": output.get("total_cost_usd"),
             },
         )
+
+    def build_env(self) -> dict[str, str]:
+        """Environment for the framework's `claude -p`.
+
+        Guarantees the director's timeout budget holds (config.DIRECTOR_TOOL_TIMEOUT_MS):
+        the per-command Bash maximum is at least the CLI default, and auto-backgrounding
+        is off — a backgrounded director call returns "moved to background", not an answer.
+        """
+        env = {**os.environ, "SYNTH_SESSION_DIR": str(self.state_dir), **self.extra_env}
+        env.pop("CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS", None)
+        try:
+            current = int(env.get("BASH_MAX_TIMEOUT_MS", "0"))
+        except ValueError:
+            current = 0
+        env["BASH_MAX_TIMEOUT_MS"] = str(max(current, _BASH_MAX_TIMEOUT_MS))
+        return env
 
     def hooks_log(self) -> list[dict]:
         """Return all hook events logged during this Run's CC session."""

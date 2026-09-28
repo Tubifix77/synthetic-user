@@ -19,6 +19,7 @@ class StopCode(Enum):
     Full set lives in architecture2.md section 2.1."""
     COMPLETE = "complete"
     REFINEMENT_COMPLETE = "refinement_complete"
+    CIRCULAR = "circular"  # a failed retry: another would only repeat prior work
 
 
 @dataclass

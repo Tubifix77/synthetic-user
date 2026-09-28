@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synthetic User</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --line: #e3e6eb; --fg: #1d232b; --dim: #667085;
+  --accent: #3b5bdb; --accent-fg: #ffffff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b;
+  --ok-bg: #e8f5ee; --warn-bg: #fdf4e3; --bad-bg: #fbeaea; --info-bg: #eef2ff; --code: #f1f3f6;
+  --radius: 10px; --shadow: 0 1px 2px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #2a3039; --fg: #e6e9ee; --dim: #98a2b3;
+    --accent: #7b93ff; --accent-fg: #0f1216; --ok: #4cc38a; --warn: #e3b341; --bad: #ff7b72;
+    --ok-bg: #12291d; --warn-bg: #2d2412; --bad-bg: #331a19; --info-bg: #1b2140; --code: #1f242c;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
+  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+header .sub { color: var(--dim); font-size: 13px; }
+.pill { margin-left: auto; font-size: 13px; padding: 3px 10px; border-radius: 99px; font-weight: 600; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+main { display: grid; grid-template-columns: 340px 1fr; gap: 20px; padding: 20px 24px;
+  max-width: 1400px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 18px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.card h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.checks li:first-child { border-top: 0; }
+.checks .mark { font-weight: 700; }
+.checks .ok .mark { color: var(--ok); } .checks .bad .mark { color: var(--bad); }
+.checks .warn .mark { color: var(--warn); } .checks .warn .fix { background: var(--warn-bg); }
+.checks .detail { color: var(--dim); font-size: 13px; }
+.checks .fix { font-size: 13px; background: var(--bad-bg); color: var(--fg); padding: 6px 8px;
+  border-radius: 6px; margin-top: 4px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--fg); padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; padding: 9px 16px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+textarea { width: 100%; min-height: 110px; font: inherit; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg); resize: vertical; }
+textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+select { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 8px; background: var(--code); border: 1px solid var(--line); cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+details summary { cursor: pointer; color: var(--dim); font-size: 14px; margin: 6px 0; }
+.models { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; font-size: 14px; margin-top: 8px; }
+.models .role small { display: block; color: var(--dim); font-size: 12px; }
+.hint { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; margin: 10px 0; }
+.history { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow: auto; }
+.history li { padding: 8px 6px; border-top: 1px solid var(--line); cursor: pointer; border-radius: 6px; }
+.history li:first-child { border-top: 0; }
+.history li:hover, .history li.sel { background: var(--info-bg); }
+.history .g { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history .m { color: var(--dim); font-size: 12px; }
+.empty { color: var(--dim); text-align: center; padding: 40px 10px; }
+.runhead { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.runhead h3 { margin: 0; font-size: 18px; flex: 1 1 400px; }
+.meta { color: var(--dim); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+.timeline { list-style: none; margin: 16px 0 0; padding: 0; position: relative; }
+.timeline::before { content: ""; position: absolute; left: 11px; top: 4px; bottom: 4px; width: 2px; background: var(--line); }
+.ev { position: relative; padding: 4px 0 12px 34px; }
+.ev .dot { position: absolute; left: 4px; top: 8px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--panel); border: 3px solid var(--dim); }
+.ev.ok .dot { border-color: var(--ok); } .ev.warn .dot { border-color: var(--warn); }
+.ev.bad .dot { border-color: var(--bad); } .ev.info .dot { border-color: var(--accent); }
+.ev.muted { color: var(--dim); font-size: 14px; }
+.ev .t { font-weight: 600; } .ev .when { color: var(--dim); font-size: 12px; margin-left: 6px; font-weight: 400; }
+.ev .d { font-size: 14px; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+.ev .box { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--code); font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.ev.bad .box { background: var(--bad-bg); } .ev.warn .box { background: var(--warn-bg); } .ev.ok .box { background: var(--ok-bg); }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.result { white-space: pre-wrap; word-break: break-word; background: var(--code); border-radius: 8px; padding: 12px 14px; font-size: 14px; max-height: 520px; overflow: auto; }
+.files { font-family: ui-monospace, Consolas, monospace; font-size: 13px; margin: 0; padding-left: 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+th { color: var(--dim); font-weight: 600; }
+.banner { padding: 10px 14px; border-radius: 8px; margin-top: 14px; font-weight: 600; }
+.banner.ok { background: var(--ok-bg); color: var(--ok); } .banner.bad { background: var(--bad-bg); color: var(--bad); }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
+.meter { height: 6px; background: var(--code); border-radius: 99px; overflow: hidden; width: 140px; display: inline-block; vertical-align: middle; }
+.meter span { display: block; height: 100%; background: var(--accent); }
+.err { color: var(--bad); font-size: 14px; margin-top: 8px; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/icon.png" alt="" width="30" height="30" style="display:block">
+  <h1>Synthetic User</h1>
+  <span class="sub">Claude Code with a stand-in human operator</span>
+  <span id="pill" class="pill warn">Checking setup…</span>
+  <button id="quit" title="Stop the Synthetic User backend">Quit</button>
+</header>
+
+<main>
+  <aside>
+    <section class="card">
+      <h2>Setup</h2>
+      <ul id="checks" class="checks"><li><span></span><span class="detail">Checking…</span></li></ul>
+      <div class="row" style="margin-top:10px">
+        <button id="recheck">Re-check</button>
+        <button id="livecheck" title="Makes one tiny call on the cheapest model">Test a live call</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>New run</h2>
+      <textarea id="goal" placeholder="Describe what Claude should build, e.g. “Write a Python script that counts words in a text file, with tests.”"></textarea>
+      <div class="chips" id="examples"></div>
+      <label class="check"><input type="checkbox" id="workspace" checked><span>Put the files in their own folder under <code>workspace/</code></span></label>
+      <label class="check"><input type="checkbox" id="allowtests"><span>Let Claude run its tests <small class="hint">(runs code it wrote, unattended)</small></span></label>
+      <details>
+        <summary>Models (defaults: Sonnet 5 and Haiku 4.5)</summary>
+        <div class="row" style="margin:6px 0">
+          <button data-preset="default">Balanced</button>
+          <button data-preset="economy">Economy (all Haiku)</button>
+        </div>
+        <div id="models" class="models"></div>
+      </details>
+      <div class="row" style="margin-top:12px">
+        <button id="start" class="primary">Start run</button>
+      </div>
+      <p class="hint">A run uses your Claude plan's quota. Claude works in this project folder, so only one run can go at a time.</p>
+      <div id="starterr" class="err"></div>
+    </section>
+
+    <section class="card">
+      <h2>Past runs</h2>
+      <ul id="history" class="history"></ul>
+    </section>
+  </aside>
+
+  <section>
+    <div class="card" id="view"><div class="empty">Start a run, or pick one from <b>Past runs</b>.</div></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const el = (tag, props = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) n.append(k);
+  return n;
+};
+
+const ROLE_LABELS = {
+  executor: ["Worker", "does the actual coding"],
+  director: ["Director", "answers Claude's questions, judges guardrails"],
+  director_hard_call: ["Director, hard calls", "the triple-check on risky questions"],
+  triage: ["Triage", "screens the request before starting"],
+  hat_correctness: ["Reviewer: correctness", ""],
+  hat_adversary: ["Reviewer: adversary", "kept on a different tier on purpose"],
+  hat_user_intent: ["Reviewer: user intent", ""],
+  escape_audit: ["Audit", "spots decisions Claude made without asking"],
+};
+const PATTERN_LABELS = {
+  git_push_to_public_repo: "push to a remote repository",
+  claim_done: "claim the work is done",
+  add_dependency: "add a dependency",
+  modify_schema: "change a database schema",
+};
+const EXAMPLES = [
+  "Write a Python script that counts words in a text file, with tests",
+  "Build a small CSV deduplicator command-line tool",
+  "Create a function that validates email addresses, with edge-case tests",
+];
+
+let modelInfo = null, currentId = null, pollTimer = null, activeRun = null;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+// ── setup ─────────────────────────────────────────────────────────────────
+function renderChecks(checks) {
+  const ul = $("#checks"); ul.replaceChildren();
+  for (const c of checks) {
+    const cls = c.ok ? "ok" : c.blocking === false ? "warn" : "bad";
+    ul.append(el("li", { class: cls },
+      el("span", { class: "mark", text: c.ok ? "✓" : cls === "warn" ? "!" : "✕" }),
+      el("div", {}, el("div", { text: c.label }), el("div", { class: "detail", text: c.detail }),
+        c.ok || !c.fix ? null : el("div", { class: "fix", text: c.fix }))));
+  }
+  const ready = checks.every((c) => c.ok || c.blocking === false);
+  setPill(ready);
+  $("#start").disabled = !ready || !!activeRun;
+  return ready;
+}
+function setPill(ready) {
+  const p = $("#pill");
+  if (activeRun) { p.className = "pill warn"; p.textContent = "Run in progress"; }
+  else if (ready) { p.className = "pill ok"; p.textContent = "Ready"; }
+  else { p.className = "pill bad"; p.textContent = "Setup needed"; }
+}
+async function recheck(live) {
+  const btn = live ? $("#livecheck") : $("#recheck");
+  btn.disabled = true; const old = btn.textContent; btn.textContent = "Checking…";
+  try { renderChecks((await api("/api/checks", { live })).checks); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+// ── models ────────────────────────────────────────────────────────────────
+function renderModels() {
+  const box = $("#models"); box.replaceChildren();
+  for (const [role, tier] of Object.entries(modelInfo.defaults)) {
+    const [name, note] = ROLE_LABELS[role] || [role, ""];
+    const sel = el("select", { "data-role": role });
+    for (const [alias, id] of Object.entries(modelInfo.tiers)) {
+      const o = el("option", { value: alias, text: modelName(id), title: id });
+      if (alias === tier) o.selected = true;
+      sel.append(o);
+    }
+    box.append(el("div", { class: "role" }, name, note ? el("small", { text: note }) : null), sel);
+  }
+}
+function modelName(id) {
+  // claude-sonnet-5 → "Sonnet 5", claude-haiku-4-5-20251001 → "Haiku 4.5"
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(id);
+  if (!m) return id;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? "." + m[3] : ""}`;
+}
+function applyPreset(name) {
+  for (const sel of document.querySelectorAll("#models select")) {
+    sel.value = name === "economy" ? "haiku" : modelInfo.defaults[sel.dataset.role];
+  }
+}
+function chosenModels() {
+  const out = {};
+  for (const sel of document.querySelectorAll("#models select")) out[sel.dataset.role] = sel.value;
+  return out;
+}
+
+// ── history ───────────────────────────────────────────────────────────────
+const STATUS_TEXT = { running: "running", complete: "done", rejected: "rejected", error: "failed", interrupted: "interrupted" };
+function ago(ts) {
+  if (!ts) return "";
+  const s = Date.now() / 1000 - ts;
+  if (s < 90) return "just now"; if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`; return new Date(ts * 1000).toLocaleDateString();
+}
+async function loadHistory() {
+  const runs = await api("/api/runs");
+  const ul = $("#history"); ul.replaceChildren();
+  if (!runs.length) ul.append(el("li", { class: "m", text: "No runs yet." }));
+  for (const r of runs) {
+    ul.append(el("li", { class: r.id === currentId ? "sel" : "", onclick: () => openRun(r.id) },
+      el("div", { class: "g", text: r.goal }),
+      el("div", { class: "m", text: `${STATUS_TEXT[r.status] || r.status} · ${ago(r.started_at)}` })));
+  }
+}
+
+// ── run view ──────────────────────────────────────────────────────────────
+function fmtTime(ts, t0) { const s = Math.max(0, Math.round(ts - t0)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; }
+
+function describe(e) {
+  // → {tone, title, detail, box} or null to hide; "tools" events are grouped by the caller.
+  const h = e.hook, a = e.action;
+  if (e.kind === "triage") return e.route === "loop"
+    ? { tone: "ok", title: "Triage accepted the request" }
+    : { tone: "bad", title: "Triage turned the request down", box: e.reason || "" };
+  if (e.kind === "cycle_start") return e.index === 0
+    ? { tone: "info", title: "Claude started working" }
+    : { tone: "info", title: `Refinement cycle ${e.index + 1} started`, box: e.goal };
+  if (e.kind === "cycle_end") return { tone: e.passed ? "ok" : "bad",
+    title: `Cycle ${e.index + 1} evaluated: ${e.passed ? "pass" : "fail"} (score ${Number(e.score).toFixed(2)})` };
+  if (h === "SessionStart" && !a) return { tone: "muted", title: "Claude session opened with the director's operating instructions" };
+  if (h === "PreToolUse" && a === "allow") return { group: "tools", tool: e.tool };
+  if (h === "PreToolUse" && a === "action_pattern") {
+    const tone = e.decision === "deny" ? "bad" : e.verdict === "redirect" ? "warn" : "ok";
+    const what = PATTERN_LABELS[e.pattern] || e.pattern;
+    const verb = e.decision === "deny" ? "blocked it" : e.verdict === "redirect" ? "allowed it with guidance" : "allowed it";
+    return { tone, title: `Guardrail: Claude tried to ${what}. The director ${verb}.`, detail: e.summary, box: e.reason };
+  }
+  if (h === "PreToolUse" && a === "interrupt") return { tone: "warn", title: "Context steward ended the cycle at a tool boundary" };
+  if (h === "PreToolUse" && a === "handler_fault_deny") return { tone: "bad", title: `Guardrail failed closed (${e.pattern})`, box: e.error };
+  if (h === "PostToolUse" && a === "suggest_compact") return { tone: "warn", title: "Context steward asked Claude to summarise its working state" };
+  if (h === "consult_director") return { tone: "info", title: "Claude asked the director instead of stopping",
+    detail: e.question_preview, box: e.verdict_preview };
+  if (h === "Stop" && a === "halt_intercepted") return { tone: "warn", title: "Claude stopped to ask a question. The director answered and it carried on.",
+    detail: e.halt_text_preview, box: e.brain_answer_preview };
+  if (h === "brain_dispatch" && a === "triple_check_complete") return { tone: "info", title: "Hard call: the director triple-checked its answer", box: e.verdict_preview };
+  if (h === "Stop" && a === "completion") return { tone: "muted", title: "Claude finished its turn" };
+  return null;
+}
+
+function buildTimeline(run) {
+  const events = [...(run.progress || []), ...(run.hook_events || [])].sort((x, y) => x.ts - y.ts);
+  const t0 = run.started_at, ul = el("ul", { class: "timeline" });
+  let group = null, tokens = null;
+  const flush = () => {
+    if (!group) return;
+    const counts = {}; for (const t of group.tools) counts[t] = (counts[t] || 0) + 1;
+    const txt = Object.entries(counts).map(([t, n]) => n > 1 ? `${t} ×${n}` : t).join(", ");
+    ul.append(el("li", { class: "ev muted" }, el("span", { class: "dot" }),
+      el("div", {}, el("span", { text: `Used tools: ${txt}` }), el("span", { class: "when", text: fmtTime(group.ts, t0) }))));
+    group = null;
+  };
+  for (const e of events) {
+    if (e.hook === "PostToolUse" && e.action === "steward_ping") { tokens = e; continue; }
+    const d = describe(e); if (!d) continue;
+    if (d.group === "tools") { (group ||= { ts: e.ts, tools: [] }).tools.push(d.tool); continue; }
+    flush();
+    ul.append(el("li", { class: `ev ${d.tone}` }, el("span", { class: "dot" }),
+      el("div", {}, el("span", { class: "t", text: d.title }), el("span", { class: "when", text: fmtTime(e.ts, t0) })),
+      d.detail ? el("div", { class: "d", text: d.detail }) : null,
+      d.box ? el("div", { class: "box", text: d.box }) : null));
+  }
+  flush();
+  if (run.status === "running") ul.append(el("li", { class: "ev info" }, el("span", { class: "dot" }),
+    el("div", {}, el("span", { class: "spinner" }), el("span", { text: "  Working…" }))));
+  return { ul, tokens };
+}
+
+function renderRun(run) {
+  const v = $("#view"); v.replaceChildren();
+  const elapsed = (run.finished_at || Date.now() / 1000) - run.started_at;
+  const { ul, tokens } = buildTimeline(run);
+  const meta = el("div", { class: "meta" },
+    el("span", { text: `Status: ${STATUS_TEXT[run.status] || run.status}` }),
+    el("span", { text: `Time: ${fmtTime(run.started_at + elapsed, run.started_at)}` }),
+    run.workspace ? el("span", {}, "Folder: ", el("code", { text: run.workspace })) : null,
+    run.models && run.models.executor ? el("span", { text: `Worker: ${modelName(run.models.executor)}` }) : null,
+    el("span", { text: run.allow_tests ? "Tests: allowed" : "Tests: not allowed" }));
+  if (tokens) {
+    const pct = Math.min(100, Math.round(100 * tokens.counted_tokens / tokens.threshold));
+    meta.append(el("span", {}, "Context used ", el("span", { class: "meter" }, el("span", { style: `width:${pct}%` })), ` ${pct}%`));
+  }
+  v.append(el("div", { class: "runhead" }, el("h3", { text: run.goal })), meta, ul);
+
+  if (run.status === "complete" && run.stop_code === "circular") {
+    v.append(el("div", { class: "banner warn",
+      text: "Stopped without passing: the evaluator failed the work, and one retry didn't fix it. See the decision log for why." }));
+  } else if (run.status === "complete") {
+    const stop = run.stop_code === "refinement_complete" ? "Finished after a refinement cycle." : "Finished.";
+    v.append(el("div", { class: "banner ok", text: `✓ ${stop}` }));
+  } else if (run.status === "rejected") {
+    v.append(el("div", { class: "banner warn", text: `Triage asked for a clearer request: ${run.error || ""}` }));
+  } else if (run.status === "error") {
+    v.append(el("div", { class: "banner bad", text: "The run failed." }), el("pre", { class: "result", text: run.error || "" }));
+  } else if (run.status === "interrupted") {
+    v.append(el("div", { class: "banner warn", text: "This run was cut off (the app was closed while it ran)." }));
+  }
+
+  const last = (run.cycles || []).at(-1);
+  if (last && last.deliverable) {
+    v.append(el("h2", { style: "margin-top:20px", text: "What Claude reported" }), el("div", { class: "result", text: last.deliverable }));
+  }
+  if ((run.files_changed || []).length) {
+    const fl = el("ul", { class: "files" }); for (const f of run.files_changed) fl.append(el("li", { text: f }));
+    v.append(el("h2", { style: "margin-top:20px", text: "Files created or changed" }), fl);
+  }
+  if (run.cost && run.cost.total_turns) {
+    v.append(el("p", { class: "hint", text: `${run.cost.cycle_count} cycle(s), ${run.cost.total_turns} Claude turn(s).` }));
+  }
+  if ((run.reports || []).length) {
+    const tb = el("tbody");
+    for (const r of run.reports) tb.append(el("tr", {},
+      el("td", { text: r.component }), el("td", { text: r.decision_type }), el("td", { text: r.selected }),
+      el("td", { text: r.rationale + (r.audit_flags && r.audit_flags.length ? `  [${r.audit_flags.join(", ")}]` : "") })));
+    v.append(el("details", { style: "margin-top:16px" }, el("summary", { text: `Decision log (${run.reports.length} reports)` }),
+      el("table", {}, el("thead", {}, el("tr", {}, el("th", { text: "Component" }), el("th", { text: "Decision" }),
+        el("th", { text: "Chose" }), el("th", { text: "Why" }))), tb)));
+  }
+}
+
+async function openRun(id) {
+  currentId = id; clearTimeout(pollTimer);
+  const tick = async () => {
+    let run;
+    try { run = await api(`/api/runs/${id}`); } catch (e) { $("#view").replaceChildren(el("div", { class: "empty", text: e.message })); return; }
+    if (currentId !== id) return;
+    renderRun(run);
+    if (run.status === "running") pollTimer = setTimeout(tick, 1500);
+    else { await refreshStatus(); loadHistory(); }
+  };
+  await tick(); loadHistory();
+}
+
+async function refreshStatus() {
+  const s = await api("/api/status");
+  activeRun = s.active_run;
+  if (!modelInfo) { modelInfo = s.models; renderModels(); }
+  renderChecks(s.checks);
+  return s;
+}
+
+async function start() {
+  const goal = $("#goal").value.trim(); $("#starterr").textContent = "";
+  if (!goal) { $("#starterr").textContent = "Describe what Claude should build first."; return; }
+  $("#start").disabled = true;
+  try {
+    const { id } = await api("/api/runs", { goal, models: chosenModels(), use_workspace: $("#workspace").checked, allow_tests: $("#allowtests").checked });
+    activeRun = id; setPill(true); openRun(id);
+  } catch (e) { $("#starterr").textContent = e.message; $("#start").disabled = false; }
+}
+
+for (const ex of EXAMPLES) $("#examples").append(el("span", { class: "chip", text: ex, onclick: () => { $("#goal").value = ex; } }));
+$("#recheck").addEventListener("click", () => recheck(false));
+$("#livecheck").addEventListener("click", () => recheck(true));
+$("#start").addEventListener("click", start);
+$("#quit").addEventListener("click", async () => {
+  if (activeRun && !confirm("A run is still in progress. Quitting stops it. Quit anyway?")) return;
+  try { await api("/api/shutdown", {}); } catch (e) { /* already gone */ }
+  clearTimeout(pollTimer);
+  document.body.replaceChildren(el("div", { class: "empty", style: "padding:80px 20px" },
+    el("h2", { text: "Synthetic User has stopped." }),
+    el("p", { text: "You can close this tab. Double-click the Synthetic User icon to start it again." })));
+});
+for (const b of document.querySelectorAll("[data-preset]")) b.addEventListener("click", () => applyPreset(b.dataset.preset));
+
+(async () => {
+  const s = await refreshStatus();
+  await loadHistory();
+  if (s.active_run) openRun(s.active_run);
+})();
+</script>
+</body>
+</html>

@@ -1,145 +1,120 @@
 # Synthetic User — Operations Manual
 
-How to install, authenticate, verify, and run Synthetic User on your own machine.
+How to install, sign in, run and troubleshoot Synthetic User on your own machine.
 
-This is the hands-on companion to [README.md](README.md) (what the system is) and [architecture2.md](architecture2.md) (why it is shaped this way). You do not need to read those to follow this, but section 12 of architecture2.md is the honest account of what the running system actually does.
+This is the hands-on companion to [README.md](README.md) (what the system is) and [architecture2.md](architecture2.md) (why it is shaped this way). Section 12 of architecture2.md is the honest account of what the running system actually does.
+
+---
+
+## 0. Quick start
+
+You need two things installed first: **Python 3.11 or newer** ([python.org](https://www.python.org/downloads/); on Windows tick *"Add python.exe to PATH"*) and **Claude Code** ([claude.com/claude-code](https://claude.com/claude-code)). You also need a Claude account on a Pro, Max, Team or Enterprise plan.
+
+1. **Sign in to Claude Code once.** Open a terminal, run `claude`, type `/login`, and finish the sign-in in your browser.
+2. **Get the project.** Download or clone `https://github.com/Tubifix77/synthetic-user`.
+3. **Start it.**
+   - **Windows:** double-click `start.bat` in the project folder, once. It installs everything and puts a **Synthetic User** icon on your desktop. From then on, **double-click that icon**: it starts the backend (no window stays open) and opens the app in your default browser. Clicking it while the app is already running just opens it again.
+   - **Mac / Linux / any terminal:** from the project folder, run `python -m pip install -e ".[dev]"` once, then `python -m synthetic_user`.
+
+The app opens at `http://localhost:8765`. The **Setup** panel on the left runs every check and shows a fix for anything that is missing. When it says **Ready**, type what you want built, then click **Start run** and watch it work.
+
+To stop the app, click **Quit** at the top right of the page. If the icon is ever missing, `python -m synthetic_user shortcut` puts it back. When the app runs without a window, its messages go to `run_state/ui.log`.
 
 ---
 
 ## 1. What you are running
 
-Synthetic User is a control wrapper around **Claude Code**. It does not replace Claude Code — it drives the official `claude` command-line tool headlessly and sits around it, playing the human-operator roles (triage, steering, context-watching, evaluation) automatically.
+Synthetic User is a control wrapper around **Claude Code**. It does not replace Claude Code. It drives the official `claude` command-line tool headlessly (`claude -p`) and plays the human-operator roles around it automatically: triage, steering, watching the context, guarding risky actions, and evaluation.
 
-So the core requirement is simple: **a working, logged-in `claude` CLI that can run non-interactively.** Almost every setup problem is really an authentication problem at that layer. Section 3 deals with it carefully.
+So the core requirement is simple: **a working, signed-in `claude` CLI that can run non-interactively.** Almost every setup problem is really an authentication or permission problem at that layer. Sections 3 and 9 deal with those.
 
 ---
 
 ## 2. Prerequisites
 
-You need four things on the machine:
-
 1. **Python 3.11 or newer.** Check with `python --version`. The project was built and verified on 3.14.
-2. **Git**, to clone the repo.
-3. **Node.js**, because the `claude` CLI is distributed through npm. Get it from nodejs.org if you don't have it.
-4. **The Claude Code CLI**, installed and runnable as `claude`. If `claude --version` prints a version, you have it. If not, install it per Anthropic's current instructions (the native installer or `npm install -g`), then re-check.
+2. **Git**, to clone the repo. The Run page also uses it to list the files a Run changed.
+3. **The Claude Code CLI**, runnable as `claude`. If `claude --version` prints a version, you have it.
 
-You also need **an Anthropic account with a Claude Code-eligible plan** — a Pro or Max subscription, an enterprise seat, or an API key. A free account cannot connect Claude Code; the login will tell you so. (During this project's build, a personal account without Pro/Max was rejected at login and an enterprise seat worked — if you have both, log in with the one that carries the entitlement.)
-
----
-
-## 3. Authenticate the CLI for headless use
-
-This is the step that matters most and the one most likely to bite you. Claude Code running *inside* its own desktop app can be logged in while the *command-line* `claude` is not — they hold credentials separately. Synthetic User uses the command line, so the command line must be logged in.
-
-**Step 3.1 — Check current status.**
-
-```
-claude auth status
-```
-
-If it reports `loggedIn: true`, skip to section 4. If it reports `loggedIn: false` / `authMethod: none`, continue.
-
-**Step 3.2 — Log in.** In a normal terminal (PowerShell on Windows), start the CLI and run the login command inside it:
-
-```
-claude
-```
-
-then at the prompt:
-
-```
-/login
-```
-
-This opens a browser OAuth flow. If the browser doesn't open on its own, the terminal prints a URL — copy it into your browser manually. Sign in with the account that has the eligible plan. If the flow shows a code, paste it back into the terminal where prompted.
-
-> If login fails with *"Claude Max or Pro is required to connect to Claude Code"*, the account you used doesn't carry the entitlement. Log out and repeat with the right account, or use an API key instead (set the `ANTHROPIC_API_KEY` environment variable and skip the OAuth flow entirely).
-
-**Step 3.3 — Verify headless operation.** This is the real test — it exercises the exact path the wrapper uses. In a plain terminal (not inside the `claude` interactive shell):
-
-```
-claude -p "reply with OK" --output-format json
-```
-
-You want a JSON object whose `result` field is `OK` (or close) and `is_error` is `false`. If you instead see `"Not logged in · Please run /login"`, the headless path still has no credentials — repeat 3.2 and make sure you completed the browser flow.
-
-Once `claude -p` returns real output, the hard part is done.
+You also need **an account with a Claude Code-eligible plan**: Pro, Max, Team, an enterprise seat, or an API key. A free account cannot connect Claude Code, and the login tells you so.
 
 ---
 
-## 4. Get the code and install
+## 3. Sign in the CLI for headless use
 
-> **Quick setup:** To automate sections 4–5, run `python bootstrap.py` from the repo root. It checks prerequisites, installs the package, verifies authentication, smoke-tests headless execution, and runs the fast test suite — stopping with an actionable message on the first failure.
+Claude Code inside its desktop app can be signed in while the *command-line* `claude` is not, because they hold credentials separately. Synthetic User uses the command line.
 
+**3.1 Check.** Run `claude auth status`. If it shows `"loggedIn": true`, you are done. The Setup panel and `python -m synthetic_user doctor` run the same check.
 
-**Step 4.1 — Clone (or locate) the repo.**
+**3.2 Sign in.** In a normal terminal, run `claude` and then `/login` at its prompt. Finish the browser flow; if no browser opens, copy the URL the terminal prints. If you get *"Claude Max or Pro is required"*, that account has no entitlement: sign in with the right one, or set `ANTHROPIC_API_KEY`.
+
+**3.3 Verify headless operation.** In a plain terminal, run `claude -p "reply with OK" --output-format json` and look for `"is_error": false`. **Test a live call** in the Setup panel does the same thing on the cheapest model.
+
+**3.4 Trust the folder (recommended).** Run `claude` interactively once *inside the project folder* and accept the trust dialog. Until you do, the CLI prints *"Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted"*. Runs still work, because the executor grants what it needs on the command line (§7), but trusting the folder keeps the CLI's view and yours the same. Trust is keyed by the exact path spelling, so trust from the desktop app may not count.
+
+---
+
+## 4. Install
+
+> **One-command setup:** `python bootstrap.py` checks prerequisites, installs the package, verifies sign-in, smoke-tests headless execution and runs the fast tests. It stops with an actionable message at the first failure. `start.bat` also installs automatically on first launch.
 
 ```
 git clone https://github.com/Tubifix77/synthetic-user.git
 cd synthetic-user
+python -m pip install -e ".[dev]"
 ```
 
-If you already have it, just `cd` into it. The repo is location-independent — it runs correctly from wherever you clone it (all hook and MCP paths resolve relative to the repo root), so there is nothing to configure after cloning.
+This installs the project in editable mode plus `pytest`. The runtime itself needs only the standard library and the `claude` CLI.
 
-**Step 4.2 — Install the package and test dependencies.**
+The repo is location-independent: every hook path resolves relative to the repo root, so nothing needs configuring after you clone or move it.
 
-```
-pip install -e ".[dev]"
-```
-
-This installs the project in editable mode plus `pytest`. The runtime leans on the `claude` CLI (run as a subprocess) for the heavy lifting; its one third-party dependency is the MCP SDK (`mcp`), used by the `consult_director` server that powers the proactive steering path. It is declared in `pyproject.toml`, so the command above installs it automatically — you do not need a separate step.
-
-If you ever see the MCP server fail to start with an import error (for example after a partial install), install it explicitly:
-
-```
-pip install mcp
-```
+The install also creates a `synth` command. On Windows it usually lands in a per-user Scripts folder that isn't on `PATH`, so this manual uses `python -m synthetic_user`, which always works. `synth …` is the same command if it is on your `PATH`.
 
 ---
 
 ## 5. Verify the install
 
-There are two tiers of test. Run the fast tier first.
+**5.1 Setup check.** Run `python -m synthetic_user doctor`, or add `--live` to include one tiny real call.
 
-**Step 5.1 — Fast tests (no LLM calls, run in seconds).** These cover the pure-Python logic: the walking skeleton, multi-cycle flow, the Decision Report query interface, and the seeder validation gate.
-
-```
-python -m pytest tests/test_scenario_01.py tests/test_scenario_02.py tests/test_scenario_09.py tests/test_scenario_15.py -v
-```
-
-All four should pass quickly. If these fail, something is wrong with the install or the Python environment, not with Claude Code — fix that before going further.
-
-**Step 5.2 — The integration tests (live `claude -p`, minutes each).** These are marked `integration` and actually drive Claude Code. They are slower (some, like the triple-check, deliberately make several model calls in series) and they cost usage against your plan.
-
-Run the whole integration tier:
+**5.2 Fast tests (no LLM calls, seconds).** These cover the pure-Python logic: scenarios 1, 2, 9 and 15, the halt-language corpus, the action-pattern matcher, hook gating, model routing, permissions and subprocess hygiene.
 
 ```
-python -m pytest -m integration -v
+python -m pytest -m "not integration"
 ```
 
-or run a single scenario while you're getting set up:
+If these fail, the problem is the install or the Python environment, not Claude Code.
+
+**5.3 Integration tests (live `claude -p`, minutes each, uses plan quota).**
 
 ```
-python -m pytest tests/test_scenario_03.py -v
+python -m pytest -m integration
+python -m pytest tests/test_scenario_16.py -v      # a single scenario
 ```
 
-> **Timeouts.** Some integration scenarios run for a few minutes. Run them in a terminal that won't impose its own short timeout. The executor's own subprocess timeout is set generously (ten minutes) precisely because the triple-check path is slow; don't wrap these tests in a runner that kills them earlier.
-
-**Step 5.3 — Everything at once.**
-
-```
-python -m pytest -v
-```
-
-A clean run is fifteen passing scenarios.
+A clean full run (`python -m pytest`) is all seventeen scenarios passing, plus the fast unit tests. Some scenarios run for several minutes (the triple-check and multi-hat panel make several model calls in series). Don't wrap them in a runner with a short timeout.
 
 ---
 
-## 6. Drive your own Run
+## 6. Run your own goal
 
-Once the tests pass, you can point the system at a goal of your own. A Run is one bounded goal-pursuit: triage decides whether to accept it, the loop executes through Claude Code, the evaluator scores each cycle, and the seeder decides when it's done.
+A Run is one bounded goal-pursuit. Triage decides whether to accept it, Claude Code executes it, the evaluator scores each cycle, and the seeder decides when it is done.
 
-The minimal shape, in Python from the repo root:
+**From the web page** (`python -m synthetic_user` or `start.bat`): type a goal and click **Start run**. The page shows a live timeline of what happened. That covers triage, each cycle, the tools Claude used, questions it put to the director, guardrail decisions and context-steward interventions. It then shows what Claude reported, the files it created, and a decision log with every component's reasoning. **Past runs** keeps them all.
+
+**From the terminal:**
+
+```
+python -m synthetic_user run "Write a Python script that reverses a file line by line, with tests" --allow-tests
+python -m synthetic_user runs
+```
+
+Options that apply to both:
+
+- **Workspace folder (on by default).** Each Run is told to put its files in `workspace/<date>-<goal>/`, which is gitignored, so Run output doesn't mix with the project's own files. Untick it (or pass `--here`) to work in the repo root.
+- **Let Claude run its tests (off by default).** This allows `pytest` and nothing else. Running tests executes code Claude just wrote, unattended, so it is a per-Run opt-in. See §7, *Permissions*.
+- **Models.** Sonnet 5 and Haiku 4.5 by default. Change any role per Run in the page's **Models** section, or with `--model executor=haiku` on the command line.
+
+**From Python** (for scripting or experiments):
 
 ```python
 from synthetic_user.orchestrator import Orchestrator
@@ -147,98 +122,123 @@ from synthetic_user.executor import ClaudeCodeExecutor
 from synthetic_user.memory import Memory
 from synthetic_user.types import Request
 
-# A fresh memory and a real Claude Code executor for this Run.
 memory = Memory()
-executor = ClaudeCodeExecutor()          # drives `claude -p` in this repo
+executor = ClaudeCodeExecutor()                     # drives `claude -p` in this repo
+run = Orchestrator(memory=memory, executor_fn=executor.execute).run(
+    Request(goal="write a Python script that reverses a file line-by-line"))
 
-orchestrator = Orchestrator(memory=memory, executor_fn=executor.execute)
-
-run = orchestrator.run(Request(goal="write a Python script that reverses a file line-by-line"))
-
-print("stop code:", run.stop_code)
-print("cycles:", len(run.cycles))
-print("final deliverable:\n", run.deliverable.content if run.deliverable else "(none)")
-
-# Inspect the audit trail — every component's reasoning is here.
-for report in memory.all_reports():
-    print(f"  [{report.component}] {report.decision_type}: {report.rationale[:80]}")
+print(run.stop_code, len(run.cycles))
+print(run.deliverable.content if run.deliverable else "(none)")
+for r in memory.all_reports():
+    print(f"  [{r.component}] {r.decision_type}: {r.rationale[:80]}")
 ```
+
+`Orchestrator` without `executor_fn` uses the instant stub executor, which is what the fast scenarios use. `synthetic_user.runner` is the layer the page and CLI use; it adds the workspace, the per-Run settings and the `run_state/<id>/run.json` record.
 
 What to expect:
 
-- **Triage** may reject a goal that has no software deliverable (try `goal="write me something interesting"` to see a rejection — `run.stop_code` will be unset and `run.rejected_reason` will explain).
-- **The framework will run in this directory.** `ClaudeCodeExecutor` invokes `claude -p` with the repo as its working directory, so any files the task creates land here. (That's why a couple of throwaway scripts from test runs are git-ignored.)
-- **Steering happens automatically.** If Claude Code stops to ask a question, the `Stop` hook resolves it and the session continues; if it calls `consult_director`, the brain answers inline. You don't intervene.
-- **The audit trail is the point.** `memory.all_reports()` and `memory.query_reports(component=..., decision_type=..., has_flag=...)` let you reconstruct *why* the system did what it did without replaying it.
+- **Triage** may turn down a goal with no software deliverable (try "write me something interesting").
+- **Steering is automatic.** If Claude stops to ask, the `Stop` hook gets it an answer; if it calls `consult_director`, the brain answers inline. You don't intervene.
+- **Guardrails are automatic.** Pushing to a remote, adding a dependency, changing a schema or claiming "done" is put to the director before it happens (§8).
 
 ---
 
 ## 7. Configuration and tuning
 
-**Tunable constants** live in `synthetic_user/config.py`:
+Everything lives in `synthetic_user/config.py`.
 
-- `SCORE_THRESHOLD` (default `0.70`) — the evaluator's Layer-1 pass bar.
-- `MAX_CYCLES_PER_RUN` (default `25`) — a safety bound; the real stop signal is the seeder, not this.
-- `MODEL_TIERS` — which Claude tier each role uses (triage/steward on Haiku, seeder/director on Sonnet, deep evaluator attribution on Opus). This is also where you would re-route the Adversary hat to a different model family if you ever gain access to one (see architecture2.md §12.5).
+**Models.** `MODELS` maps the tiers to concrete IDs (`haiku` → `claude-haiku-4-5-20251001`, `sonnet` → `claude-sonnet-5`, `opus` → `claude-opus-5-5`). `MODEL_TIERS` assigns a tier to each role:
 
-**Test-time environment knobs** (used to force rare paths deterministically in the test suite; you generally won't set these by hand):
+| Role | Default | What it does |
+|---|---|---|
+| `executor` | sonnet | Claude Code doing the actual work |
+| `triage` | haiku | screens the request |
+| `director` | sonnet | answers the framework's questions, judges guardrails |
+| `director_hard_call` | haiku | the triple-check passes (fast: Claude is blocked meanwhile) |
+| `hat_correctness`, `hat_user_intent` | sonnet | evaluator panel |
+| `hat_adversary` | haiku | evaluator panel, on a different tier on purpose |
+| `escape_audit` | haiku | post-hoc check for decisions made without asking |
 
-- `SYNTH_REACTIVE_TEST=1` — suppresses the `SessionStart` instruction so the framework does *not* call `consult_director`, forcing the reactive `Stop`-hook path (scenario 3, and any case where you want to test halt-catching).
-- `SYNTH_COMPACT_THRESHOLD_TOKENS` — lowers the steward's compaction trigger so scenario 5 fires without a real long context.
-- `SYNTH_EVAL_ANOMALY_THRESHOLD` — forces the evaluator's Layer-2 multi-hat panel to fire (scenario 8).
-- `SYNTH_IN_TRIPLE_CHECK` — internal dispatch lock the brain sets on itself during a triple-check; not for manual use.
+Every `claude -p` call resolves its model through `model_for(role)`. That is the only place models are chosen (a fast test enforces it). To override one role without editing code, set `SYNTH_MODEL_<ROLE>`, e.g. `SYNTH_MODEL_HAT_ADVERSARY=opus`, or to a full model ID. Re-routing the Adversary hat to another model family is exactly this override (architecture2.md §12.5).
 
-### Paths are repo-relative (no editing needed)
+**Permissions.** The executor runs `claude -p --dangerously-skip-permissions`. Organisation policy can **disable bypass mode**, and then that flag silently degrades to `acceptEdits`: file edits still go through, but every other tool call is denied, because nobody is there to approve it. So the executor also passes explicit allow rules (`--allowedTools`):
 
-The committed `.claude/settings.json` (hook commands) and `.mcp.json` (MCP server command) use **repo-relative paths** — `python hooks/<handler>.py` and `director_mcp/consult_director_server.py`. Claude Code runs hooks and the MCP server with the working directory set to the repo root (and exposes `CLAUDE_PROJECT_DIR`), and the Python handlers also self-locate via their own file path. The upshot: **you do not edit these files when you clone or move the repo** — it works from any location as-is. (Do not hardcode an absolute path into them; that would re-break portability.)
+- `EXECUTOR_ALLOWED_TOOLS` is always granted: the director command (`python -m synthetic_user.director`), plus read-only `ls`, `git status`, `git diff` and `git log`.
+- `TEST_RUN_TOOLS` is granted only with `SYNTH_ALLOW_TESTS=1` (the page's checkbox, or `--allow-tests`): `pytest`.
+- `SYNTH_EXTRA_ALLOWED_TOOLS` takes more rules, separated by semicolons, e.g. `Bash(npm test:*);Bash(make check)`.
 
-If you do change `.claude/settings.json` or `.mcp.json` for any other reason, fully restart any `claude` session afterward so it re-reads them.
+Grant the narrowest rule that does the job. A blanket `Bash` rule would recreate the bypass mode your policy turned off.
+
+**Other tunables:** `SCORE_THRESHOLD` (0.70, the evaluator's Layer-1 pass bar) and `MAX_CYCLES_PER_RUN` (25, a safety bound; the real stop signal is the seeder).
+
+**Test-time knobs** (force rare paths deterministically; not for normal use):
+
+- `SYNTH_DIRECTOR_DISABLED=1`: the director command answers "Director unavailable" without asking the brain. It is the authoritative off switch for the proactive path (scenario 3).
+- `SYNTH_REACTIVE_TEST=1`: skip the SessionStart instruction so the framework halts instead of consulting (scenarios 3 and 13).
+- `SYNTH_COMPACT_THRESHOLD_TOKENS`: lower the steward's trigger (scenarios 5 and 11).
+- `SYNTH_EVAL_ANOMALY_THRESHOLD`: force the Layer-2 panel to fire (scenarios 8 and 12).
+- `SYNTH_EVAL_LAYER2_DISABLED=1`: simulate the panel faulting out (scenario 12).
+- `SYNTH_IN_TRIPLE_CHECK`: an internal lock the brain sets on itself; don't set it by hand.
+
+**Hooks only act inside a Run.** `.claude/settings.json` registers the hooks for *every* Claude Code session opened in this folder, including your own. They only do anything when `SYNTH_SESSION_DIR` is set, which only the executor sets, so opening Claude Code here yourself is safe: no "no human at the keyboard" instruction, and no director answering your questions for you.
+
+If you change `.claude/settings.json`, fully restart any `claude` session so it re-reads it.
+
+**No MCP servers.** Company policy allows only official MCP servers, so this project registers none: there is deliberately no `.mcp.json`, and `doctor` warns if one appears.
 
 ---
 
-## 8. How steering works (proactive vs reactive paths)
+## 8. How steering and guardrails work
 
-When the executor (Claude Code) runs your task, there are two ways it gets direction mid-execution:
+**Proactive path (the normal one).** The `SessionStart` hook tells Claude that, when it would ask the user a question, it should run `python -m synthetic_user.director "question" "context"` through its Bash tool instead. The command blocks while the brain answers, prints the answer, and Claude continues in the same turn without halting. If the brain can't answer, the command prints an explicit "Director unavailable" and Claude carries on with its best judgement, stating its assumption. (This used to be an MCP tool; company policy now allows only official MCP servers.)
 
-**Proactive path (preferred, always-on in normal operation):**
-- At session start, the `SessionStart` hook injects an instruction telling the executor: "When you would ask the user a question, call the `consult_director` MCP tool instead."
-- The executor calls `consult_director(question, context)` mid-turn, the steering brain answers synchronously, and execution continues without halting — no pause, no turn boundary.
-- **This is the default behavior.** Any goal that includes explicit instruction to "ask a clarifying question before proceeding" will naturally use this path.
+The time budget is nested so a director call is never cut off mid-answer. The brain works to a 300-second deadline, after which it answers "unavailable". The `PreToolUse` hook sets every director call's tool timeout to 480 seconds, whatever Claude asked for. The executor makes sure the CLI's per-command maximum (600 seconds) isn't lowered, and switches off auto-backgrounding, which would otherwise return "moved to background" instead of an answer. The values live in `config.py` (`DIRECTOR_DEADLINE_S`, `DIRECTOR_TOOL_TIMEOUT_MS`).
 
-**Reactive path (fallback, only when proactive fails):**
-- If the executor doesn't call `consult_director` but instead outputs halt-language (question text directed at "the user"), the `Stop` hook's router classifies the turn.
-- If classified as a halt (matched against known question patterns), the brain is invoked reactively, returns an answer via `additionalContext`, and the executor continues in the same session.
-- This path is a safety net. If the executor forgets to consult, or `consult_director` is unreachable, the reactive hook still catches explicit questions.
+**Reactive path (safety net).** If Claude writes a question or an approval request instead of consulting, the `Stop` hook's router recognises the halt-language, the brain answers, and the answer is injected so the same session continues. A fast test pins the router against a corpus of halts and look-alike completion sentences.
 
-**Routing rule:**
-- "Ask a clarifying question" → proactive `consult_director` path (executor uses the tool as instructed)
-- Autonomous iteration with clear success criteria → continue in loop mode, no consult needed
-- The two paths cover uncorrelated failure modes: if proactive is missed, reactive catches halt-language; if halt-language is ambiguous, proactive still works.
+**Guardrails (action patterns).** Before every tool call, the `PreToolUse` hook checks for four registered, irreversible-by-definition actions:
 
-In practice you'll never see the reactive path fire in normal runs — it exists for robustness (it guards the dispatch failure modes in architecture2.md §6). If you do see it, that's a signal the SessionStart instruction needs hardening or the executor ignored it for some reason.
+| Pattern | Matches |
+|---|---|
+| `git_push_to_public_repo` | `git push` to a network remote, `gh repo create --public` (pushes to local paths are not matched) |
+| `add_dependency` | `pip/uv/poetry/npm/yarn/pnpm/cargo/go/gem/conda/dotnet add/install <package>`, writing `requirements*.txt`, `package.json`, `Cargo.toml`, etc., dependency edits in `pyproject.toml` |
+| `modify_schema` | writing `*.sql`/`*.prisma`/`*.graphql`, `schema.*` or files under `migrations/`/`alembic/`, running migrations, DDL (`CREATE/ALTER/DROP TABLE…`) |
+| `claim_done` | a TodoWrite marking every item completed |
+
+On a match, the director gives a verdict. **Proceed** lets the action run. **Redirect** lets it run with guidance injected. **Halt** blocks it and tells Claude why. If the director can't be reached or its answer can't be read, the action is **blocked** (fail closed). Ordinary tool calls never involve the director.
 
 ---
 
 ## 9. Troubleshooting
 
-**`claude -p` says "Not logged in".** The headless CLI has no credentials. Redo section 3.2 in a plain terminal and make sure you finished the browser OAuth flow. Confirm with `claude auth status`.
+**The Setup panel says "Signed in to Claude ✕", or `claude -p` says "Not logged in".** The command-line CLI has no credentials. Redo §3.2 in a plain terminal.
 
-**Login rejected: "Max or Pro is required".** The account lacks a Claude Code entitlement. Use an account that has Pro/Max or an enterprise seat, or set `ANTHROPIC_API_KEY` and skip OAuth.
+**"Claude Max or Pro is required".** The account has no Claude Code entitlement. Use an account on an eligible plan, or set `ANTHROPIC_API_KEY`.
 
-**An integration test "hangs" then fails.** It probably didn't hang — the triple-check and multi-hat scenarios run several model calls in series and take minutes. Make sure nothing is imposing a short timeout around pytest, and that you're not running it through a harness with its own cutoff. Run that one scenario alone to watch it.
+**A Run says it "needs approval" to run tests or commands.** Bypass mode is disabled on this machine (§7, *Permissions*), and the command isn't on the allow list. Tick **Let Claude run its tests** for pytest, or add a narrow rule with `SYNTH_EXTRA_ALLOWED_TOOLS`. The executor tells Claude that denied tools can't be approved, so it carries on and reports what it couldn't verify.
 
-**"No MCP servers are connected" / `consult_director` not available.** Two usual causes: the server config is in the wrong file (it must be `.mcp.json`, not `.claude/settings.json`), or the tool isn't permitted (`mcp__synthetic-user__consult_director` must be in `settings.json` → `permissions.allow`). If you relocated the repo, also check the path in `.mcp.json` (section 7). After any change, restart the `claude` session.
+**"Ignoring 1 permissions.allow entry … this workspace has not been trusted".** Harmless for Runs, which grant what they need on the command line. To silence it, run `claude` once in the project folder and accept the trust dialog (§3.4).
 
-**MCP server crashes on start with an import error.** Either the `mcp` SDK isn't installed (`pip install mcp`) or a local directory named `mcp/` is shadowing it — this project uses `director_mcp/` precisely to avoid that; don't rename it back.
+**The director keeps answering "Director unavailable".** Its answer says why. "Switched off for this Run" means `SYNTH_DIRECTOR_DISABLED=1` is set. "No synthetic-user Run is active" means it was run outside a Run. "The brain could not answer" is followed by the brain's error. "Deadline reached" means the 300-second budget ran out.
 
-**The steward never seems to fire (scenario 5 or in a real Run).** `PostToolUse` only runs for tools that *actually execute*. If Claude Code's permission layer blocks a tool before it runs (for instance, writing outside the project directory), the hook never sees it. Keep task outputs inside the repo.
+**Internal calls hang until a timeout.** Every internal `claude -p` must get `stdin=subprocess.DEVNULL`: the CLI waits on any inherited pipe. A fast test (`tests/test_subprocess_hygiene.py`) enforces this; if you add a new subprocess call, give it an explicit `stdin`.
 
-**Fast tests fail.** This points at the Python install, not Claude Code. Reinstall with `pip install -e ".[dev]"` and confirm your Python is 3.11+.
+**Garbled characters (`â€”` instead of `—`) in answers.** Something decoded Claude's UTF-8 as the Windows default code page. All subprocess calls pass `encoding="utf-8"`, and the hooks read stdin as UTF-8; keep it that way in new code.
+
+**`synth` is "not recognized".** The Scripts folder isn't on `PATH`. Use `python -m synthetic_user …` instead; it is the same command.
+
+**Setup shows "a .mcp.json is present".** Delete it. This project must not register an MCP server (company policy), and a project `.mcp.json` also brings back Claude Code's "Pending approval" prompt.
+
+**An integration test "hangs" then fails.** Usually it is just slow: the triple-check and multi-hat scenarios run several model calls in series. Run it alone to watch it.
+
+**The steward never seems to fire.** `PostToolUse` only runs for tools that actually execute; a denied tool never reaches it.
+
+**Fast tests fail.** Reinstall with `python -m pip install -e ".[dev]"` and confirm Python is 3.11+.
 
 ---
 
 ## 10. What this manual does not cover
 
-- **The design rationale** — why there are exactly these roles, what the twenty-one failure modes are, how the multi-hat evaluator resolves "who validates the validator." That's [architecture2.md](architecture2.md).
-- **Upgrading the v1 stand-ins** — moving memory to SQLite + vector storage, making brain escalation LLM-reflective rather than keyword-triggered, making the seeder's reflection LLM-backed. These are planned swaps behind stable interfaces (architecture2.md §12.4); they are development work, not operations.
-- **Anything about Anthropic's products beyond "install and log in the CLI."** For current Claude Code installation specifics, plan entitlements, and API details, consult Anthropic's own documentation — those change faster than this file.
+- **The design rationale:** why there are exactly these roles, the failure modes, and the multi-hat evaluator. See [architecture2.md](architecture2.md).
+- **Upgrading the v1 stand-ins:** SQLite + vector memory, LLM-reflective brain escalation, LLM-backed seeder reflection and a real Layer-1 evaluator. These are planned swaps behind stable interfaces (architecture2.md §12.4).
+- **Anthropic's products beyond "install and sign in the CLI".** Check Anthropic's own documentation; it changes faster than this file.

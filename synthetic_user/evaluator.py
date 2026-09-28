@@ -3,8 +3,8 @@
 Three-layer hybrid:
   Layer 1 — Rule-based score (fast, cheap). Passes non-empty deliverables.
   Layer 2 — Multi-hat panel (fires when Layer 1 score < anomaly_threshold).
-             Hats: Correctness (Sonnet), Adversary (Haiku — tier diversity),
-             User-intent (Sonnet). Each cites evidence. Adversary holds veto.
+             Hats: Correctness, Adversary (a different tier — diversity), User-intent;
+             models per config.MODEL_TIERS. Each cites evidence. Adversary holds veto.
              Inter-hat disagreement → panel_confidence signal.
   Layer 3 — Classifier update (threshold weights; stub in v1).
 
@@ -20,6 +20,7 @@ import subprocess
 from synthetic_user.types import Cycle, Score
 from synthetic_user.reports import DecisionReport, ReportBuffer
 from synthetic_user.memory import Memory
+from synthetic_user.config import model_for
 
 _DEFAULT_ANOMALY_THRESHOLD = 0.5
 
@@ -31,14 +32,14 @@ def _anomaly_threshold() -> float:
         return _DEFAULT_ANOMALY_THRESHOLD
 
 
-def _claude(prompt: str, model: str = "claude-sonnet-4-5") -> str:
+def _claude(prompt: str, model: str) -> str:
     """Internal LLM call. Strips SYNTH_SESSION_DIR so hooks become no-ops."""
     env = {k: v for k, v in os.environ.items() if k != "SYNTH_SESSION_DIR"}
     try:
         r = subprocess.run(
             ["claude", "-p", prompt, "--model", model,
              "--output-format", "json", "--dangerously-skip-permissions"],
-            capture_output=True, text=True, timeout=120, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, env=env, stdin=subprocess.DEVNULL,
         )
         if r.returncode != 0:
             return f"[evaluator error rc={r.returncode}]"
@@ -84,11 +85,6 @@ _HAT_ROLES = {
     ),
 }
 
-_HAT_MODELS = {
-    "correctness": "claude-sonnet-4-5",
-    "adversary": "claude-haiku-4-5",   # different tier for bias diversity (arch section 2.5)
-    "user_intent": "claude-sonnet-4-5",
-}
 
 
 def _run_hat(hat_name: str, goal: str, deliverable_text: str) -> dict:
@@ -99,7 +95,7 @@ def _run_hat(hat_name: str, goal: str, deliverable_text: str) -> dict:
         deliverable=deliverable_text[:2000],
         role_desc=_HAT_ROLES[hat_name],
     )
-    raw = _claude(prompt, model=_HAT_MODELS[hat_name])
+    raw = _claude(prompt, model=model_for(f"hat_{hat_name}"))
     # Strip markdown fences if model adds them.
     if raw.startswith("```"):
         raw = raw.split("```")[1]
@@ -206,7 +202,7 @@ def _dispatch_escape_audit(cycle: Cycle) -> tuple[bool, str]:
     goal = cycle.goal
     deliverable_text = (cycle.deliverable.content if cycle.deliverable else "")[:2000]
     prompt = _ESCAPE_PROMPT.format(goal=goal, deliverable=deliverable_text)
-    raw = _claude(prompt, model="claude-haiku-4-5")
+    raw = _claude(prompt, model=model_for("escape_audit"))
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):

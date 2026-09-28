@@ -19,7 +19,7 @@ import os
 import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
-from hooks.state import add_counted_tokens, log_hook_event
+from hooks.state import add_counted_tokens, in_run, log_hook_event, read_payload
 
 # Default threshold: 60% of 200k-token context window.
 _DEFAULT_THRESHOLD = 120_000
@@ -50,7 +50,9 @@ def _estimate_tokens(payload: dict) -> int:
 
 
 def main():
-    payload = json.load(sys.stdin)
+    if not in_run():
+        return
+    payload = read_payload()
     session_id = payload.get("session_id", "")
     tool_name = payload.get("tool_name", "")
 

@@ -2,7 +2,7 @@
 
 > A closed-loop control system that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure replacing the human roles that ordinarily sit around such a loop.
 
-**Status: BUILT — first full pass complete.** All fifteen acceptance scenarios pass against a live Claude Code subprocess. The design phase (v1.5) is locked in [architecture2.md](architecture2.md); the implemented system is described in [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) and the [operations manual](OPERATIONS.md).
+**Status: BUILT, and hardened on 2026-09-28.** All seventeen acceptance scenarios pass against a live Claude Code subprocess, and there is now a local web UI for running it (see *Getting it running*). The design phase (v1.5) is locked in [architecture2.md](architecture2.md); the implemented system is described in [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) and the [operations manual](OPERATIONS.md).
 
 ## What it is
 
@@ -34,7 +34,7 @@ The agentic loop itself — planning, tool use, code generation, verification �
 The wrapper drives the official `claude` CLI headlessly (`claude -p`) and intercepts the framework through two mechanisms it already exposes:
 
 - **Hooks** (`.claude/settings.json`) — `SessionStart` injects operating instructions, `Stop` runs the halt-language router (reactive steering), `PreToolUse` and `PostToolUse` feed the steward and action-pattern triggers.
-- **An MCP tool** (`.mcp.json` → `director_mcp/`) — `consult_director` is the proactive steering path: the framework calls it instead of stopping to ask, the brain answers, the framework continues without ever halting.
+- **A director command** (`python -m synthetic_user.director`, run through Claude's Bash tool) — the proactive steering path: the framework runs it instead of stopping to ask, the brain answers, the framework continues without ever halting.
 
 These two paths cover uncorrelated failure modes — if the framework forgets to consult, the Stop hook still catches halt-language; if halt-language is ambiguous, the consult path still works. Both were verified end-to-end (scenarios 3 and 4).
 
@@ -57,14 +57,14 @@ The buildable architecture lives in [architecture2.md](architecture2.md) (v1.5, 
 
 - **Run** — one bounded Synthetic User goal-pursuit, made of one or more cycles, terminates on a seeder stop code
 - **Cycle** — one seeder → framework execution → evaluator scoring iteration; maps 1:1 to a Claude Code "turn"
-- **Hybrid synth-user dispatch** — proactive entry via the `consult_director` MCP tool + reactive entry via the `Stop` hook; uncorrelated failure modes covered by both paths
+- **Hybrid synth-user dispatch** — proactive entry via the director command + reactive entry via the `Stop` hook; uncorrelated failure modes covered by both paths
 - **Decision Reports** — every component documents its reasoning in a schema-validated stream, routed through the evaluator (the sole memory writer) for persistence
 
 **Twenty-one named failure modes** cover the predictable ways the system fails — most are interaction failures between components rather than component-internal bugs.
 
 ## Build status
 
-All fifteen acceptance scenarios pass against a live `claude -p` subprocess. See [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) for the full record, including where the implementation deliberately diverged from the design (the steering control surfaces were built as **hooks plus an MCP server** rather than as Claude Code subagents — the cleaner integration surface in practice).
+All seventeen acceptance scenarios pass against a live `claude -p` subprocess. See [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) for the full record, including where the implementation deliberately diverged from the design (the steering control surfaces were built as **hooks plus an MCP server** rather than as Claude Code subagents — the cleaner integration surface in practice).
 
 | # | Scenario | What it exercises |
 |---|----------|-------------------|
@@ -80,12 +80,18 @@ All fifteen acceptance scenarios pass against a live `claude -p` subprocess. See
 | 10 | Dispatch lock | prevents the proactive and reactive paths from double-firing |
 | 11–14 | Hardening scenarios | incl. post-hoc dispatch-escape detection (scenario 13, FM-18) |
 | 15 | Seeder validation gate | fixture-based human-agreement measurement (~83%) |
+| 16 | Action-pattern guardrail | `PreToolUse` gates a registered action (e.g. adding a dependency) through a live brain verdict |
+| 17 | Guardrails survive `cd` | hooks still fire after the framework changes directory |
 
-The current build uses in-process memory and a keyword-triggered brain escalation as legitimate v1 implementations of the architecture's interfaces; both are designed as swaps (SQLite + vector memory; LLM-reflective escalation) rather than rewrites.
+The current build uses v1 stand-ins behind the architecture's interfaces: in-process memory, keyword-triggered brain escalation, a heuristic seeder, and a Layer-1 evaluator that only checks a deliverable exists. Each is designed as a swap rather than a rewrite; architecture2.md §12.4 lists them honestly.
 
 ## Getting it running
 
-See **[OPERATIONS.md](OPERATIONS.md)** — install prerequisites, authenticate the `claude` CLI for headless use, run the acceptance suite, and drive your own Run.
+1. Install **Python 3.11+** and **Claude Code**, then sign in once: run `claude` and type `/login`.
+2. **Windows:** double-click `start.bat` once. It installs everything and adds a **Synthetic User** desktop icon, and from then on the icon is the one click that starts the app. **Elsewhere:** run `python -m pip install -e ".[dev]"`, then `python -m synthetic_user`.
+3. The web UI opens in your default browser. It checks your setup and tells you how to fix anything that's missing. Then describe what you want built and click **Start run**.
+
+From a terminal, `python -m synthetic_user run "..."` does the same thing. **[OPERATIONS.md](OPERATIONS.md)** has everything else: signing in for headless use, permissions, models, the test suite and troubleshooting.
 
 ## Lineage
 
@@ -103,7 +109,8 @@ Conceptual ancestors:
 ## Repository layout
 
 ```
-Synthetic/
+synthetic-user/
+├── start.bat                 — Windows one-click launcher (first run installs + adds the desktop icon)
 ├── README.md                 — this file
 ├── OPERATIONS.md             — install + usage manual
 ├── CLAUDE.md                 — Claude Code project guide (build-time orientation)
@@ -125,22 +132,25 @@ Synthetic/
 │   ├── reports.py            — Decision Report schema + per-Run buffer
 │   ├── executor.py           — ClaudeCodeExecutor: drives `claude -p`, resumes sessions
 │   ├── types.py              — shared vocabulary (Run, Cycle, Route, StopCode, …)
-│   ├── config.py             — tunable constants + per-role model tiers
+│   ├── config.py             — tunables, per-role model tiers (the only place models are chosen), executor permissions
+│   ├── runner.py             — runs a real Run for the UI/CLI, records it to run_state/<id>/run.json
+│   ├── director.py           — consult_director as a Bash-run command (the proactive steering path)
+│   ├── doctor.py             — setup checks with plain-language fixes
+│   ├── cli.py, __main__.py   — `python -m synthetic_user` / `synth`: ui, doctor, run, runs
+│   ├── ui/                   — local web UI (stdlib http.server + one HTML page); icon drawn by ui/make_icon.py
 │   └── utils.py
 │
 ├── hooks/                    — Claude Code hook handlers (the interception surface)
 │   ├── session_start_handler.py  — injects operating instructions
 │   ├── stop_handler.py           — reactive steering on halt-language
 │   ├── router.py                 — halt-language classifier
-│   ├── pre_tool_use_handler.py   — action-pattern triggers
+│   ├── pre_tool_use_handler.py   — steward interrupt + action-pattern guardrails
+│   ├── action_patterns.py        — the four registered patterns + verdict → hook mapping
 │   ├── post_tool_use_handler.py  — steward monitor
 │   └── state.py                  — per-Run IPC: hooks log, dispatch lock, token counter
 │
-├── director_mcp/             — the proactive steering path
-│   └── consult_director_server.py — FastMCP server exposing consult_director
 │
-├── .claude/settings.json     — hook wiring + MCP tool permission (committed)
-├── .mcp.json                 — project-scope MCP server registration (committed)
+├── .claude/settings.json     — hook wiring (committed). There is deliberately no .mcp.json.
 │
 └── tests/                    — one acceptance test per scenario
     ├── test_scenario_01.py … test_scenario_15.py

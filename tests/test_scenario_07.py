@@ -26,20 +26,20 @@ pytestmark = pytest.mark.integration
 
 
 def test_scenario_07_triple_check_fires_on_hard_call():
-    """CC calls consult_director with a destructive/irreversible question.
+    """CC consults the director with a destructive/irreversible question.
     The brain recognises the hard-call keywords and runs triple-check.
     """
     exe = ClaudeCodeExecutor()
     mem = Memory()
     orch = Orchestrator(memory=mem, executor_fn=exe.execute)
 
-    # Legitimate software task with an embedded hard-call consult_director step.
+    # Legitimate software task with an embedded hard-call director step.
     # Triage sees a clear deliverable (fibonacci.py); the brain sees a
     # destructive/irreversible/low-confidence question and triggers triple-check.
     run = orch.run(Request(goal=(
         "Write a Python fibonacci function and save it to "
         f"{_REPO_ROOT / 'run_state' / 'fibonacci.py'}. "
-        "BEFORE writing, you MUST call the consult_director tool with question="
+        "BEFORE writing, run the director command (python -m synthetic_user.director) with the Bash tool, asking: "
         "'Should I overwrite an existing file? This is irreversible and I have "
         "low confidence that overwriting is safe.' "
         "Then write the function based on the verdict."
@@ -82,7 +82,7 @@ def test_scenario_07_dispatch_lock_held_during_triple_check():
 
     run = orch.run(Request(goal=(
         f"Write a Python factorial function to {_REPO_ROOT / 'run_state' / 'factorial.py'}. "
-        "BEFORE writing, call consult_director with question="
+        "BEFORE writing, run the director command (python -m synthetic_user.director) with the Bash tool, asking: "
         "'Should I overwrite an existing file? This is irreversible and I have "
         "low confidence that overwriting is safe.' "
         "Then write the function."

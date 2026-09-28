@@ -13,6 +13,7 @@ import os
 import subprocess
 from synthetic_user.types import Request, Route
 from synthetic_user.reports import DecisionReport, ReportBuffer
+from synthetic_user.config import model_for
 
 # ---------------------------------------------------------------------------
 # Stage-2 prompt
@@ -54,11 +55,11 @@ def _stage2_classify(goal: str) -> tuple[str, str]:
         result = subprocess.run(
             [
                 "claude", "-p", prompt,
-                "--model", "claude-haiku-4-5",
+                "--model", model_for("triage"),
                 "--output-format", "json",
                 "--dangerously-skip-permissions",
             ],
-            capture_output=True, text=True, timeout=60, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, env=env, stdin=subprocess.DEVNULL,
         )
         if result.returncode != 0:
             return "loop", f"stage2 error (rc={result.returncode}), defaulting to loop"

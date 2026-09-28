@@ -13,6 +13,10 @@ CRITERIA_DECLARATION_PROMPT = (
 _COMPLEX_KEYWORDS = {"build", "create", "implement", "develop"}
 
 
+_RETRY_PREFIX = ("The previous attempt did not pass evaluation. Fix what is wrong or "
+                 "missing and finish the task: ")
+
+
 def _is_complex(goal: str) -> bool:
     low = goal.lower()
     return any(kw in low for kw in _COMPLEX_KEYWORDS)
@@ -59,10 +63,17 @@ def reflect(cycle: Cycle, run: Run, buffer: ReportBuffer) -> SeederDecision:
             + (" (refinement complete)" if complex_goal else "")
         )
         stop_code_str = stop_code.value
+    elif cycle.goal.startswith(_RETRY_PREFIX):
+        # The retry failed too: another identical retry only overlaps prior work (§2.1).
+        decision = SeederDecision(stop=StopCode.CIRCULAR)
+        lens_verdict = "circular"
+        rationale = "stub multi-lens: the retry also failed; a further retry would repeat it — stopping"
+        stop_code_str = StopCode.CIRCULAR.value
     else:
-        decision = SeederDecision(direction="retry/improve", criteria=["address failures"])
+        decision = SeederDecision(direction=f"{_RETRY_PREFIX}{run.request.goal}",
+                                  criteria=["address failures"])
         lens_verdict = "retry"
-        rationale = "stub multi-lens: cycle did not pass; all lenses agree: continue"
+        rationale = "stub multi-lens: cycle did not pass; all lenses agree: one retry"
         stop_code_str = "continue"
 
     buffer.add(DecisionReport(

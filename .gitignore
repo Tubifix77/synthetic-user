@@ -54,3 +54,6 @@ run_state/
 /fibonacci.py
 /factorial.py
 /calc2.py
+
+# Where Runs started from the UI / `synth run` put their files (one folder per Run)
+workspace/

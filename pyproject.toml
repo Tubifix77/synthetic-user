@@ -3,12 +3,10 @@ name = "synthetic-user"
 version = "0.0.1"
 description = "Closed-loop synthetic-user control wrapper around Claude Code"
 requires-python = ">=3.11"
-# The runtime leans on the `claude` CLI (a subprocess), so deps are minimal.
-# `mcp` is required: the proactive steering path (consult_director) is a FastMCP
-# stdio server, and director_mcp/consult_director_server.py imports it at startup.
-dependencies = [
-    "mcp>=1.0",
-]
+# The runtime leans on the `claude` CLI (a subprocess): standard library only.
+# (No `mcp`: the director is a command, not an MCP server — company policy allows
+# only official MCP servers. tests/test_no_mcp_server.py keeps it that way.)
+dependencies = []
 # Still deferred until scenarios demand them:
 #   - SQLite memory: stdlib (sqlite3)
 #   - vector memory: chromadb or faiss  (memory consolidation, §12.4)
@@ -16,11 +14,17 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[project.scripts]
+synth = "synthetic_user.cli:main"
+
 [tool.setuptools]
-# Only synthetic_user is an importable package. hooks/ and director_mcp/ are
-# invoked by path (via .claude/settings.json and .mcp.json), not imported, so
-# they are deliberately excluded from package discovery.
-packages = ["synthetic_user"]
+# Only synthetic_user (and its ui subpackage) is importable. hooks/ is invoked by
+# path (via .claude/settings.json), not imported, so it is deliberately excluded
+# from package discovery.
+packages = ["synthetic_user", "synthetic_user.ui"]
+
+[tool.setuptools.package-data]
+"synthetic_user.ui" = ["index.html", "icon.png", "icon.ico"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

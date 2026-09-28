@@ -204,14 +204,8 @@ def smoke_test_headless() -> None:
 
 def run_fast_tests() -> None:
     step("Running fast test suite (no LLM calls)")
-    fast_tests = [
-        "tests/test_scenario_01.py",
-        "tests/test_scenario_02.py",
-        "tests/test_scenario_09.py",
-        "tests/test_scenario_15.py",
-    ]
     result = run_cmd(
-        [sys.executable, "-m", "pytest"] + fast_tests + ["-q"],
+        [sys.executable, "-m", "pytest", "-m", "not integration", "-q"],
         capture=True,
         timeout=300,
     )
@@ -240,13 +234,16 @@ def print_success() -> None:
     print("    • claude CLI installed and authenticated")
     print("    • Package installed (pip install -e '.[dev]')")
     print("    • Headless claude -p works end-to-end")
-    print("    • Fast test suite (4 scenarios)")
+    print("    • Fast test suite (no LLM calls)")
     print()
     print("  Next steps:")
+    print("    • Open the web UI and start a run:")
+    print("        python -m synthetic_user        (Windows: or double-click start.bat)")
+    print()
     print("    • Run the full integration suite (requires live claude -p, ~minutes):")
     print("        python -m pytest -m integration -v")
     print()
-    print("    • Run all 15 scenarios at once:")
+    print("    • Run all 17 scenarios at once:")
     print("        python -m pytest -v")
     print()
     print("    • Drive a real Run — see OPERATIONS.md section 6 for the")

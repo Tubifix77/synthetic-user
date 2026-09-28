@@ -5,7 +5,8 @@ the safe-direction default for each:
   - PreToolUse: allows ordinary tools when handler crashes
   - Stop: lets CC stop (routes to evaluator) when handler crashes
   - PostToolUse: skips one steward update without aborting the cycle
-  - consult_director: returns explicit "director unavailable" result
+  - consult_director: returns explicit "director unavailable" result (the brain
+    part here; the director command's own fail-safes: tests/test_director_script.py)
 
 Each failure must be logged as a finding.
 

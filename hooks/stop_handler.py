@@ -10,16 +10,20 @@ iteration. We must not block again (infinite-loop guard; CC enforces max 8).
 """
 import json
 import sys
+import time
 
 _REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _REPO_ROOT)
 from hooks.router import is_halt, read_last_assistant_text
-from hooks.state import log_hook_event, get_dispatch_lock, clear_dispatch_lock
+from hooks.state import in_run, log_hook_event, get_dispatch_lock, clear_dispatch_lock, read_payload
 from synthetic_user.brain import dispatch as brain_dispatch
+from synthetic_user.config import DIRECTOR_DEADLINE_S
 
 
 def main():
-    payload = json.load(sys.stdin)
+    if not in_run():
+        return
+    payload = read_payload()
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     already_blocked = payload.get("stop_hook_active", False)
@@ -44,7 +48,8 @@ def main():
         sys.exit(0)
 
     # Halt detected: invoke brain, inject answer, block the stop so CC continues.
-    brain_answer = brain_dispatch(last_text)
+    # Same budget as a proactive consult; the hook's own timeout (settings.json) outlasts it.
+    brain_answer = brain_dispatch(last_text, deadline=time.monotonic() + DIRECTOR_DEADLINE_S)
     log_hook_event({
         "hook": "Stop",
         "session_id": session_id,

@@ -32,7 +32,7 @@ def test_scenario_10_dispatch_lock_prevents_double_fire():
     # assertion is that only ONE brain dispatch occurs per turn regardless.
     run = orch.run(Request(
         goal=(
-            "You MUST call the consult_director tool first and ask it: "
+            "First run the director command (python -m synthetic_user.director) with the Bash tool and ask it: "
             "'What should this utility function do?' "
             "After calling it, write a Python function based on the answer."
         )
@@ -44,7 +44,7 @@ def test_scenario_10_dispatch_lock_prevents_double_fire():
     hooks_log = exe.hooks_log()
 
     # Proactive path must have fired at least once.
-    director_calls = filter_hook_events(hooks_log, hook="consult_director")
+    director_calls = filter_hook_events(hooks_log, hook="consult_director", action="proactive_dispatch")
     assert len(director_calls) >= 1, (
         "consult_director was never called — proactive path not exercised. "
         "Hook log: " + str(hooks_log)

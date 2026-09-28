@@ -39,7 +39,13 @@ def test_scenario_08_layer2_fires_on_anomaly():
         os.environ.clear()
         os.environ.update(original)
 
-    assert run.stop_code in (StopCode.COMPLETE, StopCode.REFINEMENT_COMPLETE)
+    # The Run must terminate cleanly. This uses the stub executor, whose
+    # deliverable is literally "[stub deliverable …]"; a competent panel may
+    # rightly fail it, and then the clean stop is `circular` after one retry
+    # (§2.1). Before that stop existed, a failing panel looped to the 25-cycle
+    # safety bound — hence the cycle bound too.
+    assert run.stop_code in (StopCode.COMPLETE, StopCode.REFINEMENT_COMPLETE, StopCode.CIRCULAR)
+    assert len(run.cycles) <= 2, f"{len(run.cycles)} cycles — the failing Run did not stop"
 
     # Memory should contain a Layer 2 panel report.
     layer2_reports = mem.query_reports(decision_type="layer2_panel")

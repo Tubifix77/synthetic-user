@@ -45,6 +45,10 @@ HALT_UTTERANCES = [
     "I have a question about the expected behavior for duplicates.",
     # multi-sentence: narration followed by the actual question.
     "I've drafted the structure. What should the return type be?",
+    # asking the operator to approve a blocked tool (seen live, 2026-09-28).
+    "Running the tests requires your approval — please approve the pytest command if you'd like me to verify it.",
+    "I'm waiting for your permission to run the migration.",
+    "Please grant access to the Bash tool so I can run the tests.",
 ]
 
 # Completion prose that must NOT be classified as a halt. Each deliberately
@@ -71,6 +75,10 @@ COMPLETION_UTTERANCES = [
     "I'll let you know via the return value if validation fails.",
     "The config determines what should happen on error.",
     "Done. The function reverses the list line by line.",
+    "The deploy step requires approval from a maintainer in CI.",
+    "The approval workflow is documented in CONTRIBUTING.md.",
+    "Tests pass; the pytest run needed no approval.",
+    "The function checks the user has permission before writing.",
 ]
 
 

@@ -1206,7 +1206,7 @@ New failure mode FM-21 (hat-collapse / false consensus). Architecture now at **2
 
 ### 12.1 Status
 
-The first full build pass is complete. All fifteen acceptance scenarios (section 10.3) pass against a live `claude -p` subprocess. The build followed the acceptance-test-driven discipline of section 10: each scenario was written as a failing test before the production code that satisfied it, and LLM-calling components were never mocked.
+The first full build pass is complete. All fifteen acceptance scenarios (section 10.3) pass against a live `claude -p` subprocess. Scenarios 16 and 17, for the `PreToolUse` action-pattern triggers, were added in the 2026-09-28 hardening pass (section 12.8). The build followed the acceptance-test-driven discipline of section 10: each scenario was written as a failing test before the production code that satisfied it, and LLM-calling components were never mocked.
 
 Build order followed section 10.4: 1 → 2 → 15 → 3 → 4 → 6 → 9 → 10 → 5 → 7 → 8 → 13 → 14 → 11 → 12.
 
@@ -1216,7 +1216,7 @@ The design (sections 1.5, 2.9, and the CLAUDE.md substrate note) anticipated the
 
 The build instead implements the steering surface as **hooks plus a project-scope MCP server**, with no subagents:
 
-- **Proactive steering** is an MCP tool, `consult_director`, exposed by a FastMCP server (`director_mcp/consult_director_server.py`, registered in `.mcp.json`). The framework calls the tool mid-task instead of stopping; the brain answers; the framework continues without halting.
+- **Proactive steering** is `consult_director`, now a command the framework runs through its Bash tool (`python -m synthetic_user.director "question" "context"`, `synthetic_user/director.py`). The framework runs it mid-task instead of stopping; the brain answers on stdout; the framework continues without halting. *(Until 2026-09-29 it was an MCP tool exposed by a FastMCP server registered in `.mcp.json`; company policy now allows only official MCP servers — §12.9.)*
 - **Reactive steering** is the `Stop` hook (`hooks/stop_handler.py`) running a halt-language router (`hooks/router.py`). When the framework emits a question or halt-language instead of finishing, the router catches it, the brain resolves it, and the resolution is injected back as `additionalContext` so the same session continues.
 - **The brain itself** (`synthetic_user/brain.py`) is a plain module that calls `claude -p` directly for its reasoning passes, rather than being a subagent definition.
 
@@ -1234,11 +1234,14 @@ Why the divergence: in practice the hook + MCP surface is the cleaner and better
 | Evaluator, 3-layer + multi-hat panel (§2.5, §2.6 write-gating, v1.5) | `synthetic_user/evaluator.py` — sole memory writer |
 | Decision Reports schema + buffer (§2.8) | `synthetic_user/reports.py` |
 | Memory + query (§2.6) | `synthetic_user/memory.py` — `query_reports` |
-| Hybrid dispatch, proactive + reactive (§2.9) | `consult_director` MCP tool + `Stop` hook router |
+| Hybrid dispatch, proactive + reactive (§2.9) | `consult_director` command (`synthetic_user/director.py`, via Bash) + `Stop` hook router |
 | Dispatch lock (FM-15/§2.9) | `hooks/state.py` dispatch-lock + `SYNTH_IN_TRIPLE_CHECK` env guard |
 | Post-hoc dispatch-escape detection (FM-18) | evaluator audit, exercised by scenario 13 |
 | Orchestrator (§2.9) | `synthetic_user/orchestrator.py` — thin; owns state + report buffer |
 | Executor = the framework (§2.2) | `synthetic_user/executor.py` `ClaudeCodeExecutor` — drives `claude -p`, resumes sessions |
+| Action-pattern triggers (§2.9, TBD-2c) | `hooks/action_patterns.py` (matching + verdict mapping) + `hooks/pre_tool_use_handler.py` + `brain.judge_action` |
+| Per-role model tiers (§2.5/8) | `synthetic_user/config.py` `MODEL_TIERS` / `model_for()` — the only place a model is chosen |
+| Human front end (not in the design) | `synthetic_user/runner.py`, `cli.py`, `doctor.py`, `ui/` — web UI + `synth` CLI; observes Runs, changes nothing about them |
 
 ### 12.4 v1 implementations that stand in for fuller designs
 
@@ -1247,25 +1250,60 @@ These are honest, working implementations of the architecture's *interfaces*, de
 - **Memory is in-process** (`memory.py` holds Decision Reports in a list with a real query interface). The design's four-store SQLite + vector-memory model (§2.5/2.6) is the upgrade. The single-writer rule (evaluator only) is already enforced, so the storage backend can change underneath without touching callers.
 - **Brain escalation is keyword-triggered** (`brain.py` `_is_hard_call` matches a hard-call keyword set, then runs the triple-check). The design's LLM-reflective "is this consequential?" judgement is the upgrade. The triple-check pipeline itself (answer → critique → reconcile) is real.
 - **The seeder's multi-lens reflection is a structured stub** that drives correct cycle/stop behaviour and emits the right Decision Reports. Scenario 15's fixture-based gate (~83% agreement, with a deliberate honest miss) is precisely the instrument the design calls for to decide when to replace it with LLM-backed reflection.
+- **Evaluator Layer 1 only checks that a deliverable exists** (score 0.9 if non-empty, else 0.0), so with the default anomaly threshold (0.5) the Layer-2 multi-hat panel only fires on an empty deliverable. The panel itself is real and is exercised by forcing it (scenarios 8 and 12). Real Layer-1 rules — did tests run and pass, does the output end in unresolved halt-language, did the framework report a failure — are the upgrade that makes Layer 2 fire on genuine anomalies. Layer 3 (classifier weight update) is not implemented. *(Disclosed 2026-09-28; it was previously unlisted here.)*
+- **Action-pattern matching approximates two of the four patterns.** `git_push_to_public_repo` treats any network remote as potentially public (visibility would need a network call per push) and exempts only local-path remotes; `claim_done` recognises a TodoWrite that marks every item completed, not other ways of declaring completion.
 
 ### 12.5 Substrate facts confirmed at build time
 
 - The system runs on a **Claude subscription / enterprise seat** via the official `claude` CLI driven headlessly (`claude -p`). No metered API key; no OAuth-token lifting. This honours the ToS posture in the substrate decision.
-- The Adversary hat (v1.5 Layer 2) runs on a **different model tier** (Haiku) rather than a different model family — subscription-only Claude Code makes every call a Claude call. The design flagged this as a known compromise; the hat interface is built so that routing it to a cross-family provider (Bedrock/Vertex/other) is a configuration swap. See `synthetic_user/config.py` `MODEL_TIERS`.
-- Per-role model tiers live in `config.py`; pass thresholds and the cycle safety bound are there too.
+- The Adversary hat (v1.5 Layer 2) runs on a **different model tier** (Haiku) rather than a different model family — subscription-only Claude Code makes every call a Claude call. The design flagged this as a known compromise; routing it to a cross-family provider is a configuration swap: `SYNTH_MODEL_HAT_ADVERSARY=<model>` or an edit to `MODEL_TIERS`. *(Until 2026-09-28 this claim was false: `MODEL_TIERS` was never read and every module hardcoded its model. It is now the single source, pinned by `tests/test_model_tiers.py`.)*
+- Per-role model tiers live in `config.py` (`MODEL_TIERS` → tier aliases → `MODELS` IDs; Sonnet 5 / Haiku 4.5 by default, nothing on Opus); pass thresholds, the cycle safety bound and the executor's permission grants are there too.
 
 ### 12.6 Integration lessons worth preserving
 
 Hard-won facts about the Claude Code integration surface, recorded so they are not re-derived:
 
-- **MCP servers must be registered in `.mcp.json`** (project root), *not* in `.claude/settings.json`. A `mcpServers` block in `settings.json` is silently ignored.
-- **MCP tools are not covered by `--dangerously-skip-permissions`.** Each tool must be explicitly allowed (e.g. `mcp__synthetic-user__consult_director` in `settings.json` → `permissions.allow`).
+- *(Historical — the MCP server was removed in §12.9.)* **MCP servers must be registered in `.mcp.json`** (project root), *not* in `.claude/settings.json`; a `mcpServers` block in `settings.json` is silently ignored. **MCP tools are not covered by `--dangerously-skip-permissions`**; each must be explicitly allowed.
 - **`PostToolUse` only fires for tools that actually execute.** If the framework's permission layer blocks a tool before execution (for example a write outside the project), the hook never runs — so the steward sees nothing for that call.
-- **Do not name a local package directory `mcp/`** — it shadows the installed `mcp` package and crashes the FastMCP import. The server lives in `director_mcp/` for this reason.
+- *(Historical.)* **Do not name a local package directory `mcp/`** — it shadows the installed `mcp` package and crashes the FastMCP import.
 - **Session-state directories are keyed once per Run** and must not be re-pointed after the framework returns its real session id, or hook output written under the original key becomes unreadable.
+- **Project hooks fire for every session in the folder** — a developer's interactive session and the wrapper's own internal `claude -p` reasoning calls included. Handlers must be inert unless `SYNTH_SESSION_DIR` is set (`hooks/state.in_run()`); otherwise the director answers the human's questions and the brain recursively dispatches from inside its own calls.
+- **Internal `claude -p` calls need `stdin=subprocess.DEVNULL`.** The CLI reads piped stdin and waits for EOF. Inside the `consult_director` MCP server, stdin is the JSON-RPC pipe, so every proactive consult hung until the 120 s timeout. Pinned by `tests/test_subprocess_hygiene.py`.
+- **Grant the executor's tools on the command line (`--allowedTools`).** `settings.json` → `permissions.allow` is ignored in a workspace the CLI does not trust (trust is keyed by exact path spelling; the desktop app's trust of `D:\Projects\…` did not count for the CLI's `D:/Projects/…`). And organisation policy can disable bypass mode, which turns `--dangerously-skip-permissions` into `acceptEdits` without an error — edits pass, every other tool is denied because nobody can approve it. The grants are least-privilege and configurable (`config.EXECUTOR_ALLOWED_TOOLS`, opt-in `TEST_RUN_TOOLS`).
+- **Decode everything as UTF-8 on Windows.** `claude -p` output and hook stdin are UTF-8; Python's default there is cp1252, which garbles model answers and can crash on some bytes — and a `PreToolUse` crash before matching fails open, skipping the guardrail.
+- **Anchor hook commands on `$CLAUDE_PROJECT_DIR`.** Hooks run in the session's *current* directory, not the project root. With CWD-relative commands (`python hooks/<handler>.py`, as §12.7's portability fix first had them), one `cd` by the framework made every hook fail to start — and a hook that can't start is non-blocking, so the guardrails failed open. Found by a live Run's own report; pinned by scenario 17.
+- **Set explicit hook timeouts** for handlers that call the brain (`Stop` 420 s, `PreToolUse` 180 s); a hook killed by a timeout fails open.
 
 ### 12.7 Rough edges and their status
 
 - **Portability — RESOLVED.** Hook and MCP paths in `.claude/settings.json` and `.mcp.json` were originally absolute (`D:/AI/Synthetic/...`), so the repo could not be moved or cloned elsewhere without editing. This is fixed: those config paths are now repo-relative (`python hooks/<handler>.py`, `director_mcp/consult_director_server.py`), resolved against the working directory Claude Code sets to the repo root, and the Python handlers self-locate via `Path(__file__)`. The `pyproject.toml` packaging and the `mcp` dependency were also corrected so a fresh `pip install -e ".[dev]"` is sufficient. Verified by relocating the repo to a different absolute path and re-running the integration suite from the new location. The "identical on any machine" goal in CLAUDE.md now holds.
-- **The fuller memory backend, LLM-reflective brain escalation, and LLM-backed seeder reflection (§12.4)** remain as planned upgrades behind stable interfaces.
+- **The fuller memory backend, LLM-reflective brain escalation, LLM-backed seeder reflection and real Layer-1 evaluator rules (§12.4)** remain as planned upgrades behind stable interfaces.
+- **Action-pattern triggers — RESOLVED (2026-09-28).** Designed in §2.9 and locked in TBD-2c, but the `PreToolUse` handler had shipped as an allow-all stub, and this was not listed as a stand-in. Now built (§12.8).
+- **Model routing — RESOLVED (2026-09-28).** See §12.5.
+- **CLI drift since June — RESOLVED (2026-09-28).** On Claude Code 2.1.283 scenarios 4 and 7 failed: `consult_director` was denied (untrusted workspace) and, once permitted, hung on inherited stdin. Both are fixed (§12.6).
 - **Halt-classifier precision — RESOLVED.** Hardening `test_scenario_03` initially widened a halt-language pattern in `hooks/router.py`, which turned out to be a latent regression: the widened pattern matched ~8/10 ordinary completion sentences (e.g. "Here is what the function should return") as halts. This was fixed by re-anchoring `is_halt` on interrogative *structure* (a sentence that opens with a wh-word or request frame AND ends with "?", or an inherently request-like phrase such as "could you clarify"), so declarative prose can no longer trip it. Verified at 0 false positives / 0 false negatives across a 39-sentence corpus plus held-out probes, and pinned by a fast deterministic unit test (`tests/test_router_halt_patterns.py`) so the regression cannot silently return. `test_scenario_03` was also made deterministic (it drives the executor directly, bypassing the live-LLM triage judgment that made it flaky, and asserts both the block `halt_intercepted` and the continue `allow_passthrough`); confirmed across 8 consecutive runs.
+
+### 12.8 Hardening pass, 2026-09-28
+
+- **Action-pattern triggers built** (`hooks/action_patterns.py`). The four TBD-2c patterns are matched deterministically. On a match the brain returns proceed / redirect / halt (`brain.judge_action`, with the Run's goal read from the transcript as context), mapped exactly as §2.9 specifies. The registered set fails closed (FM-19, as written in §8): an unreachable director, an unreadable verdict, or a handler crash after a match all deny, while ordinary tools still fail open. Matching, the mapping and fail-closed are pinned by fast tests. **Scenario 16** (integration) checks the live path: a dependency-manifest write is gated by a real brain verdict, and the hook's decision matches that verdict.
+- **Scenario 17**: hook commands anchored on `$CLAUDE_PROJECT_DIR`, so a `cd` by the framework no longer silently disables every hook, the guardrails included (§12.6).
+- **SessionStart instruction reworded** as an honest description of the setup. The old wording ("no human at the keyboard … you MUST … authoritative answer") reads as a prompt injection, and Sonnet 5 refused to act on it, which silently disabled the proactive path (scenario 4).
+- **Hooks gated to Runs**, the **MCP stdin hang**, **explicit tool grants**, **UTF-8 decoding** and **hook timeouts** (§12.6).
+- **Halt router**: requests addressed to the operator for approval ("requires your approval", "please approve …") are now halts, after a live Run ended on one uncaught. They are anchored to "your", so descriptions of other people's approval steps stay completion prose. The corpus grew to 46 cases, with 0 false positives and 0 false negatives. SessionStart now also tells the framework that denied tools can't be approved, so it carries on and reports what it couldn't verify.
+- **Human front end**: a local web UI and `synth` CLI (`python -m synthetic_user`), setup checks with plain-language fixes, a per-Run `workspace/` folder, per-Run model and permission choices, a live timeline, and Run history (`run_state/<id>/run.json`). It composes the Orchestrator and executor as OPERATIONS §6 does and changes nothing about Run behaviour.
+
+### 12.9 The director without an MCP server, 2026-09-29
+
+Company policy now allows only official MCP servers, and this account is under that policy. So the project-scope FastMCP server behind `consult_director` was removed, along with `.mcp.json`, `director_mcp/` and the `mcp` dependency. The capability stays; only its hosting changed again (after §12.2's subagents → MCP). Options weighed: a skill (it would still call the same script, plus a model-judged trigger step) and a subagent (the brain's triple-check, model routing, logging and dispatch lock would move into a prompt, reversing §12.2). A **Bash-invoked command** keeps the behaviour intact:
+
+- **Same semantics.** `python -m synthetic_user.director "question" "context"` blocks, calls the same `brain.dispatch`, sets the same dispatch lock, logs the same `consult_director` event, and prints the verdict. Claude reads it and continues in the same turn. Every failure is an explicit "Director unavailable: … use your best judgement and state the assumption" on stdout with exit 0 (FM-19, as §8 specifies).
+- **Permission.** One narrow grant, `Bash(python -m synthetic_user.director:*)` (plus the PowerShell equivalent), passed via `--allowedTools`. The PreToolUse hook exempts director calls from the action patterns, because the question text may well mention DDL or `pip install`.
+- **Time budget.** A director killed mid-answer returns nothing, a failure mode the MCP transport didn't have. So the layers nest, each outlasting the one inside it:
+  - brain passes, at most 120 s each, capped to the remaining budget;
+  - `DIRECTOR_DEADLINE_S` = 300 s, after which the director answers "unavailable";
+  - `DIRECTOR_TOOL_TIMEOUT_MS` = 480 s, which the PreToolUse hook sets on every director call via `updatedInput`, whatever timeout Claude requested;
+  - the CLI's per-command Bash maximum of 600 s (default when `BASH_MAX_TIMEOUT_MS` is unset). The executor guarantees at least that, removes `CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS` (a backgrounded call returns "moved to background", not an answer), and allows 1,200 s per turn.
+
+  The CLI's rules were read from the installed binary (2.1.283): default `BASH_DEFAULT_TIMEOUT_MS` or 120,000 ms; maximum `max(BASH_MAX_TIMEOUT_MS or 600,000, default)`; auto-backgrounding only when that variable is set. The Stop hook's reactive dispatch uses the same 300 s deadline inside its 420 s hook timeout.
+- **Off switch.** `SYNTH_DIRECTOR_DISABLED=1` is authoritative: the command answers "unavailable" without touching the brain. Scenario 3 relies on it and asserts that no director call answered. The Bash deny rule it also passes is only a safety net, since deny rules are prefix matches.
+- **Keeping it out.** `tests/test_no_mcp_server.py` fails on any `.mcp.json`, `director_mcp/`, `mcp` dependency or `mcp__` grant. `doctor` shows a non-blocking warning if a `.mcp.json` reappears; it would also bring back Claude Code's "Pending approval" prompt.

@@ -22,9 +22,13 @@ Why this test drives the executor directly (not Orchestrator.run()):
 
 Determinism aids (all retained):
   - SYNTH_REACTIVE_TEST=1: suppresses the SessionStart consult_director injection
-    so CC has no instruction to call that tool — it outputs a question as text.
-  - --disallowed-tools mcp__synthetic-user__consult_director: removes the tool from
-    the session entirely, so CC cannot route via the proactive path.
+    so CC has no instruction to run the director — it outputs a question as text.
+  - SYNTH_DIRECTOR_DISABLED=1: the AUTHORITATIVE off switch for the proactive path.
+    Even if CC found and ran the director command, it would only answer "director
+    unavailable" — so the test does not depend on permission-rule matching.
+  - A Bash deny rule on the director command: a safety net only. Deny rules are
+    prefix matches, so a variant spelling could slip past it; the switch above
+    is what the test relies on, and assertion (3) checks it held.
   - The goal specifies the exact clarifying question for CC to emit. That question
     matches the halt regex, so detection is deterministic; the only model behaviour
     relied upon is compliance with "ask this first, don't code yet", which is
@@ -35,6 +39,7 @@ reactive answer is itself a live model call).
 Run with: pytest -m integration
 """
 import pytest
+from synthetic_user.config import DIRECTOR_COMMAND
 from synthetic_user.executor import ClaudeCodeExecutor
 from hooks.state import filter_hook_events
 
@@ -57,8 +62,8 @@ _GOAL = (
 def test_scenario_03_reactive_stop_hook():
     # Drive the executor directly — no Orchestrator, no triage in the path.
     exe = ClaudeCodeExecutor(
-        extra_env={"SYNTH_REACTIVE_TEST": "1"},
-        extra_flags=["--disallowed-tools", "mcp__synthetic-user__consult_director"],
+        extra_env={"SYNTH_REACTIVE_TEST": "1", "SYNTH_DIRECTOR_DISABLED": "1"},
+        extra_flags=["--disallowed-tools", f"Bash({DIRECTOR_COMMAND}:*)"],
     )
 
     # One CC session. CC emits the clarifying question; the Stop hook intercepts it,
@@ -87,3 +92,8 @@ def test_scenario_03_reactive_stop_hook():
         "resume past the block, so block-and-continue was not proven. "
         "Hook log actions: " + str(actions)
     )
+
+    # (3) The proactive path really was off: no director call produced an answer.
+    #     (A director_disabled event is fine — it means the switch did its job.)
+    answered = filter_hook_events(hooks_log, hook="consult_director", action="proactive_dispatch")
+    assert not answered, f"the proactive path answered despite being disabled: {answered}"
