@@ -91,7 +91,7 @@ python -m pytest -m integration
 python -m pytest tests/test_scenario_16.py -v      # a single scenario
 ```
 
-A clean full run (`python -m pytest`) is all seventeen scenarios passing, plus the fast unit tests. Some scenarios run for several minutes (the triple-check and multi-hat panel make several model calls in series). Don't wrap them in a runner with a short timeout.
+A clean full run (`python -m pytest`) is all seventeen scenarios passing, plus the fast unit tests. The live scenarios run Claude Code in the repo root, and a test Run can create or edit project files, so check `git status` afterwards and discard anything a Run wrote. Some scenarios run for several minutes (the triple-check and multi-hat panel make several model calls in series). Don't wrap them in a runner with a short timeout.
 
 ---
 

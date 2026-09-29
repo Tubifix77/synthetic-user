@@ -2,7 +2,7 @@
 
 > A closed-loop control system that wraps an existing agentic framework (Claude Code as v1 reference) with infrastructure replacing the human roles that ordinarily sit around such a loop.
 
-**Status: BUILT, and hardened on 2026-09-28.** All seventeen acceptance scenarios pass against a live Claude Code subprocess, and there is now a local web UI for running it (see *Getting it running*). The design phase (v1.5) is locked in [architecture2.md](architecture2.md); the implemented system is described in [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) and the [operations manual](OPERATIONS.md).
+**Status: BUILT, and hardened on 2026-09-28**, when all seventeen acceptance scenarios passed against a live Claude Code subprocess. There is now a local web UI for running it (see *Getting it running*). Since then the proactive steering path moved from an MCP server to a plain command, because company policy allows only official MCP servers. The fast suite passes on that change, but its live re-run is still to do (see *Build status*). The design phase (v1.5) is locked in [architecture2.md](architecture2.md); the implemented system is described in [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) and the [operations manual](OPERATIONS.md).
 
 ## What it is
 
@@ -36,7 +36,7 @@ The wrapper drives the official `claude` CLI headlessly (`claude -p`) and interc
 - **Hooks** (`.claude/settings.json`) — `SessionStart` injects operating instructions, `Stop` runs the halt-language router (reactive steering), `PreToolUse` and `PostToolUse` feed the steward and action-pattern triggers.
 - **A director command** (`python -m synthetic_user.director`, run through Claude's Bash tool) — the proactive steering path: the framework runs it instead of stopping to ask, the brain answers, the framework continues without ever halting.
 
-These two paths cover uncorrelated failure modes — if the framework forgets to consult, the Stop hook still catches halt-language; if halt-language is ambiguous, the consult path still works. Both were verified end-to-end (scenarios 3 and 4).
+These two paths cover uncorrelated failure modes — if the framework forgets to consult, the Stop hook still catches halt-language; if halt-language is ambiguous, the consult path still works. Both were verified end-to-end (scenarios 3 and 4) on 2026-09-28, when the proactive path was still an MCP tool; the command version awaits its live re-run.
 
 ## The hypothesis being tested
 
@@ -64,14 +64,14 @@ The buildable architecture lives in [architecture2.md](architecture2.md) (v1.5, 
 
 ## Build status
 
-All seventeen acceptance scenarios pass against a live `claude -p` subprocess. See [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) for the full record, including where the implementation deliberately diverged from the design (the steering control surfaces were built as **hooks plus an MCP server** rather than as Claude Code subagents — the cleaner integration surface in practice).
+All seventeen acceptance scenarios passed against a live `claude -p` subprocess on 2026-09-28 (26 of 26 integration tests). The proactive steering path was then switched to the director command on 2026-09-29; the fast suite passes, and the live re-run of the scenarios that exercise it (3, 4, 7, 10, 13, 14, 16, 17) is still to do. See [architecture2.md section 12](architecture2.md#12-build-status--what-was-actually-implemented) for the full record, including where the implementation deliberately diverged from the design: the steering control surfaces are **hooks plus a director command**, not Claude Code subagents (§12.2), and not an MCP server either (§12.9).
 
 | # | Scenario | What it exercises |
 |---|----------|-------------------|
 | 1 | Walking skeleton | end-to-end data flow, Decision Reports to memory |
 | 2 | Refinement run | multi-cycle, seeder multi-lens reflection, `REFINEMENT_COMPLETE` |
 | 3 | Reactive steering | `Stop`-hook halt router catches halt-language, brain resolves, framework continues |
-| 4 | Proactive steering | framework calls `consult_director`, brain answers, no halt |
+| 4 | Proactive steering | framework runs the director command, brain answers, no halt |
 | 5 | Context steward | token tracking → `suggest_compact` with preservation guidance |
 | 6 | Triage rejection | Stage-2 classifier rejects a goal with no software deliverable |
 | 7 | Triple-check | hard-call escalation: answer → critique → reconcile |
@@ -84,6 +84,8 @@ All seventeen acceptance scenarios pass against a live `claude -p` subprocess. S
 | 17 | Guardrails survive `cd` | hooks still fire after the framework changes directory |
 
 The current build uses v1 stand-ins behind the architecture's interfaces: in-process memory, keyword-triggered brain escalation, a heuristic seeder, and a Layer-1 evaluator that only checks a deliverable exists. Each is designed as a swap rather than a rewrite; architecture2.md §12.4 lists them honestly.
+
+**Known issue:** the live scenarios run Claude Code in the repo root, so a test Run can edit the project's own files. One added a `slugify` function to `synthetic_user/utils.py` (it was caught and kept out of the commit). Runs started from the UI or `synthetic_user run` use a `workspace/` folder, but the test Runs don't yet. See architecture2.md §12.7.
 
 ## Getting it running
 
@@ -149,11 +151,11 @@ synthetic-user/
 │   ├── post_tool_use_handler.py  — steward monitor
 │   └── state.py                  — per-Run IPC: hooks log, dispatch lock, token counter
 │
-│
 ├── .claude/settings.json     — hook wiring (committed). There is deliberately no .mcp.json.
 │
-└── tests/                    — one acceptance test per scenario
-    ├── test_scenario_01.py … test_scenario_15.py
+└── tests/                    — one acceptance test per scenario, plus fast unit tests
+    ├── test_scenario_01.py … test_scenario_17.py
+    ├── test_*.py             — fast unit tests: halt router, action patterns, director, hook gating, …
     └── fixtures/scenario_15_human_verdicts.json
 ```
 

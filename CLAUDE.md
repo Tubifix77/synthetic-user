@@ -8,9 +8,11 @@ human-operator roles that normally sit around an agentic loop: triage,
 seeding/direction, in-flight steering, context stewardship, and post-hoc
 evaluation.
 
-**The build is complete.** All 17 acceptance scenarios pass against a live
-`claude -p` subprocess (16 and 17, for the PreToolUse guardrails, landed in the
-2026-09-28 hardening pass). A local web UI + `synth` CLI front the system. The design phase (v1.5) is locked; what exists now is a
+**The build is complete.** All 17 acceptance scenarios passed against a live
+`claude -p` subprocess on 2026-09-28 (16 and 17, for the PreToolUse guardrails,
+landed in that hardening pass). The proactive path then moved from an MCP server
+to the director command (2026-09-29, §12.9): fast suite green, **live re-run of
+scenarios 3, 4, 7, 10, 13, 14, 16, 17 still pending**. A local web UI + `synth` CLI front the system. The design phase (v1.5) is locked; what exists now is a
 working system. Current work is hardening, portability, tooling, and replacing
 v1 stand-ins with fuller implementations — not greenfield building.
 
@@ -82,7 +84,8 @@ intercepts the framework through two mechanisms it already exposes:
 
 These cover uncorrelated failure modes (if the framework forgets to consult, the
 Stop hook still catches halt-language; if halt-language is ambiguous, the consult
-path still works). Both verified end-to-end (scenarios 3 and 4).
+path still works). Both verified end-to-end (scenarios 3 and 4) — the command
+version of the proactive path is awaiting its live re-run.
 
 > Note: the original design (and earlier versions of this file) anticipated the
 > control surfaces as Claude Code **subagents** in `.claude/agents/`. The build
@@ -196,7 +199,10 @@ from the installed package).
 
 ## Status
 - Design: v1.5, complete. Tags v1.2-locked, v1.3, v1.4, v1.5 on origin.
-- Build: **all 17 scenarios pass.** v1 stand-ins behind stable interfaces:
+- Build: **all 17 scenarios passed live on 2026-09-28**; the director-command
+  switch (2026-09-29) is fast-suite green, live re-run pending. Known issue: live
+  scenarios run in the repo root, so a test Run can edit project files (§12.7) —
+  check `git status` after an integration run. v1 stand-ins behind stable interfaces:
   in-process memory, keyword-triggered brain escalation, heuristic seeder
   reflection, and a Layer-1 evaluator that only checks a deliverable exists (so
   the Layer-2 panel rarely fires on its own). Upgrades are swaps, not rewrites;
